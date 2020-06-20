@@ -11,6 +11,10 @@ tmp_dir = 'C:\AppsData\gx_temp'
 dx_km=400.
 size_pix=[400,400,75]
 
-download_serial_hmi, tstart = tstart, tend = tend, tstep = tstep, centre = centre, $
-                      out_dir = out_dir, tmp_dir = tmp_dir, dx_km = dx_km, size_pix = size_pix
+;download_serial_hmi, tstart = tstart, tend = tend, tstep = tstep, centre = centre, $
+;                      out_dir = out_dir, tmp_dir = tmp_dir, dx_km = dx_km, size_pix = size_pix
+
+download_parallel_hmi,tstart = tstart, tend = tend, tstep = tstep, centre = centre, $
+                      out_dir = out_dir, tmp_dir = tmp_dir, dx_km = dx_km, size_pix = size_pix, n_proc = 8
+
 END

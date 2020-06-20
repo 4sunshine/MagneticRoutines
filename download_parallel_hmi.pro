@@ -1,5 +1,5 @@
 PRO download_parallel_hmi, tstart = tstart, tend = tend, tstep = tstep, centre = centre, $
-  size_pix = size_pix, dx_km = dx_km, out_dir = out_dir, tmp_dir = tmp_dir, nproc = nproc
+  size_pix = size_pix, dx_km = dx_km, out_dir = out_dir, tmp_dir = tmp_dir, n_proc = n_proc
   ;
   ; THIS IS ROUTINE TO DOWNLOAD HMI AND AIA DATA IN SERIAL MANNER AND CREATE POTENTIAL FIELD BOXES
   ;
@@ -29,6 +29,7 @@ PRO download_parallel_hmi, tstart = tstart, tend = tend, tstep = tstep, centre =
   ; centres per process
   c_proc = INDGEN(n_proc)
   
+  
   ; all exclude one proc
   FOR i = 0, n_proc - 1  DO BEGIN
     t_proc[i] = times[i*tasks_per_proc: (i+1)*tasks_per_proc]
@@ -36,8 +37,8 @@ PRO download_parallel_hmi, tstart = tstart, tend = tend, tstep = tstep, centre =
   ENDFOR
   
   ; last processor
-  t_proc[-1] = times[(n_proc-1) * tasks_per_proc: ]
-  c_proc[-1] = centres[(n_proc-1) * tasks_per_proc: ]
+  t_proc[-1] = times[(n_proc-1) * tasks_per_proc:*]
+  c_proc[-1] = centres[(n_proc-1) * tasks_per_proc:*]
   
   
   tasks = OBJARR(n_proc)

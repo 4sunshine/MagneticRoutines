@@ -1,7 +1,7 @@
 ;start time
-tstart = '2017-09-03 22:00:00'
+tstart = '2017-09-03 22:00:00' ; CORRECT SETUP '2017-09-03 22:00:00'
 ;end_time
-tend = '2017-09-04 09:11:00'
+tend = '2017-09-04 09:11:00' ; CORRECT SETUP
 ;step_time
 tstep = '00:12:00'
 ;initial_conditions
@@ -14,7 +14,8 @@ size_pix=[400,400,75]
 ;download_serial_hmi, tstart = tstart, tend = tend, tstep = tstep, centre = centre, $
 ;                      out_dir = out_dir, tmp_dir = tmp_dir, dx_km = dx_km, size_pix = size_pix
 
-download_parallel_hmi,tstart = tstart, tend = tend, tstep = tstep, centre = centre, $
-                      out_dir = out_dir, tmp_dir = tmp_dir, dx_km = dx_km, size_pix = size_pix, n_proc = 8
+;download_parallel_hmi,tstart = tstart, tend = tend, tstep = tstep, centre = centre, $
+;                      out_dir = out_dir, tmp_dir = tmp_dir, dx_km = dx_km, size_pix = size_pix, n_proc = 8
+
 
 END

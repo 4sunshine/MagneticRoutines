@@ -7,11 +7,17 @@ FOREACH t, target_time, index DO BEGIN
   ll=arcmin2hel(initial_xy(0)/60., initial_xy(1)/60., date = anytim(t, /yohkoh, /date))
   lat = ll(0)
   lon = ll(1)
-  lonn = lon + diff_rot((anytim(target_time) - anytim(initial_time)) / daylong, lat)
+  lonn = lon + diff_rot((anytim(t) - anytim(initial_time)) / daylong, lat)
   new_coord = ROUND(hel2arcmin(lat, lonn, date = anytim(t, /yohkoh, /date))*60.)
-  print,'ta',target_coord[index,*],'o',new_coord
   target_coord[index, *] = new_coord
 ENDFOREACH
 
 RETURN, target_coord
+END
+
+FUNCTION make_boxes, times = times, centres = centres, size_pix = size_pix, dx_km = dx_km, out_dir = out_dir, tmp_dir = tmp_dir
+  FOREACH t, times, index DO BEGIN
+    gx_box_prepare_box, t, centres[index], size_pix, dx_km, out_dir = out_dir, /cea, tmp_dir = tmp_dir, /aia_euv
+  ENDFOREACH
+RETURN, 1
 END

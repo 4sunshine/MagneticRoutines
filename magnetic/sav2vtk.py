@@ -7,10 +7,20 @@ from magnetic.gx_box import GXBox
 from tqdm import tqdm
 
 
-def save_vector_data(vx, vy, vz, vector_name, filename):
+def save_scalar_data(vx, vy, vz, vector_name, filename):
+    """NEED TO RE-IMPLEMENT THIS FUNCTION"""
     assert np.shape(vx) == np.shape(vy) == np.shape(vz)
     imageToVTK(filename, cellData={f'{vector_name} x': vx, f'{vector_name} y': vy,
                f'{vector_name} z': vz})
+    return None
+
+
+def save_vector_data(vx, vy, vz, vector_name, filename, origin=(0., 0., 0.), spacing=(1., 1., 1.)):
+    assert np.shape(vx) == np.shape(vy) == np.shape(vz)
+    X = np.arange(origin[0], np.shape(vx)[0], spacing[0], dtype='float64')
+    Y = np.arange(origin[1], np.shape(vx)[1], spacing[1], dtype='float64')
+    Z = np.arange(origin[2], np.shape(vx)[2], spacing[2], dtype='float64')
+
     return None
 
 

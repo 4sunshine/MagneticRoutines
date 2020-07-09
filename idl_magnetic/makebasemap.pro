@@ -37,9 +37,10 @@ files = DIALOG_PICKFILE(TITLE = 'SELECT BOXES TO MAKE MAPS', FILTER = '*.sav', /
 szz = size(files)
 
 ; c speed of light in CGS units
-
+;!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 c = 3.E10
-dx_km = 1000.
+dx_km = 400.
+;!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 ;r_sun = 6.96d10 ; cm, SOLAR RADIUS ANFINOGENTOV GXBOX
 setenv, 'WCS_RSUN=6.96d8'

@@ -13,21 +13,21 @@ class GXBox(object):
                        if type(ptr) == np.recarray]
 
     @property
-    def bx(self, order='C'):
+    def bx(self, order='F'):
         if order == 'C':
             return self._box.bx[0]
         else:
             return np.transpose(self._box.bx[0], (2, 1, 0))
 
     @property
-    def by(self, order='C'):
+    def by(self, order='F'):
         if order == 'C':
             return self._box.by[0]
         else:
             return np.transpose(self._box.by[0], (2, 1, 0))
 
     @property
-    def bz(self, order='C'):
+    def bz(self, order='F'):
         if order == 'C':
             return self._box.bz[0]
         else:

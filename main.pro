@@ -18,8 +18,8 @@ size_pix=[400,400,75]
 ;                      out_dir = out_dir, tmp_dir = tmp_dir, dx_km = dx_km, size_pix = size_pix
 
 
-DATAFILE ='AIA_94NORH_NLFFFE_170903_225842.sav' ;input image file
-LOOPFILE ='LIKE.dat' ;filename for output data
+DATAFILE ='C:\AppsData\NLFFFE\BASEMAPS\sav\17 GHz (R+L), KNORH_NLFFFE_170903_224642.sav' ;input image file
+LOOPFILE ='NORH_I.dat' ;filename for output data
 ;IMAGE1 =READFITS(datafile,header)
 restore,DATAFILE
 IMAGE1 = mapw.data
@@ -35,5 +35,6 @@ TEST =1001 ;option for display of traced structures if TEST < NSTRUC
 PARA =[NSM1,RMIN,LMIN,NSTRUC,NLOOPMAX,NGAP,THRESH1,THRESH2]
 LOOPTRACING_AUTO4,IMAGE1,IMAGE2,LOOPFILE,PARA,OUTPUT,TEST
 x = IMAGE(IMAGE2)
+
 
 END

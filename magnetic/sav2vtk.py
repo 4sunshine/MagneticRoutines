@@ -1,5 +1,5 @@
 import numpy as np
-from pyevtk.hl import imageToVTK, gridToVTK
+from pyevtk.hl import imageToVTK, gridToVTK, pointsToVTK
 import glob
 import os
 from joblib import Parallel, delayed
@@ -10,6 +10,29 @@ from magnetic.mathops import curl, angles, directions_closure
 
 def save_scalar_data(s, scalar_name, filename):
     imageToVTK(filename, pointData={scalar_name: s})
+    return None
+
+
+def source_points():
+    nx, ny, nz = (20, 20, 2)
+    X = np.linspace(200, 400, nx)
+    Y = np.linspace(200, 400, ny)
+    Z = np.linspace(10, 30, nz)
+    X, Y, Z = np.meshgrid(X, Y, Z)
+    X = X.flatten()
+    Y = Y.flatten()
+    Z = Z.flatten()
+    pts_count = np.shape(X)[0]
+    data = np.ones(pts_count, dtype='float32')
+    pointsToVTK('C:/AppsData/test', X, Y, Z, {'source': data})
+    return None
+
+
+def save_scalar_cube(cube, data_name, filename, origin=(0., 0., 0.), spacing=(1., 1., 1.)):
+    X = np.arange(origin[0], np.shape(cube)[0], spacing[0], dtype='float64')
+    Y = np.arange(origin[1], np.shape(cube)[1], spacing[1], dtype='float64')
+    Z = np.arange(origin[2], np.shape(cube)[2], spacing[2], dtype='float64')
+    gridToVTK(filename, X, Y, Z, pointData={data_name: cube})
     return None
 
 
@@ -31,35 +54,28 @@ def field_from_box(filename):
     return bx, by, bz
 
 
-def energy_density(bx, by, bz):
-    e = np.power(bx, 2) + np.power(by, 2) + np.power(bz, 2)
+def energy_density(b_cube):
+    e = np.sum(np.power(b_cube, 2), axis=-1)
     return e / 8. / np.pi
 
 
-def free_energy(e_high, e_low, absolute=True):
-    if absolute:
-        return e_high - e_low
-    else:
-        return (e_high - e_low) / e_low
-
-
-def central_derivative(files, timestep):
-    reader = vtkStructuredPointsReader()
-    reader.SetFileName(files[0])
-    mesh = np.array(meshio.read(files[1]).point_data['Bnlfffe'])
-    print(np.shape(mesh))
-    return None
-
-
-def folder_derivative(path, field_name, func=free_energy, filter='.vtr', n_jobs=8, timestep=720):
-    """TIME DERIVATIVE OF DATA IN FOLDER. ASSUMING EQUIDISTANT FILES"""
-    """
-        PARAMETERS: timestep in seconds
-    """
-    all_files = sorted(files_list(path, filter))
-    files_triplets = [all_files[i-1: i+2] for i in range(1, len(all_files) - 1)]
-    central_derivative(files_triplets[0], timestep)
-    return None
+# def central_derivative(files, timestep):
+#     reader = vtkStructuredPointsReader()
+#     reader.SetFileName(files[0])
+#     mesh = np.array(meshio.read(files[1]).point_data['Bnlfffe'])
+#     print(np.shape(mesh))
+#     return None
+#
+#
+# def folder_derivative(path, field_name, func=free_energy, filter='.npy', n_jobs=8, timestep=720):
+#     """TIME DERIVATIVE OF DATA IN FOLDER. ASSUMING EQUIDISTANT FILES"""
+#     """
+#         PARAMETERS: timestep in seconds
+#     """
+#     all_files = sorted(files_list(path, filter))
+#     files_triplets = [all_files[i-1: i+2] for i in range(1, len(all_files) - 1)]
+#     central_derivative(files_triplets[0], timestep)
+#     return None
 
 
 def prepare_target_name(filename, target_dir='target'):
@@ -93,11 +109,43 @@ def box2npy(filename, field_name):
     return None
 
 
+def free_energy(pot_dir, high_dir, absolute=True):
+    """
+
+    :param pot_dir:
+    :param high_dir: Directory with non-potential files
+    :param absolute: True, Calculate absolute or relative free energy density
+    :return: None
+    """
+    # PARALLEL IMPLEMENTATION LATER MAYBE
+    pot_files = files_list(pot_dir, filter='.npy')
+    high_files = files_list(high_dir, filter='.npy')
+    assert len(pot_files) == len(high_files)
+    # pot_triplets = [pot_files[i-1: i+2] for i in range(len(pot_files))]
+    # high_triplets = [high_files[i - 1: i + 2] for i in range(len(high_files))]
+    for p, h in tqdm(zip(pot_files, high_files)):
+        pot = np.load(p)
+        high = np.load(h)
+        e_p = energy_density(pot)
+        e_np = energy_density(high)
+        if absolute:
+            free = e_np - e_p
+        else:
+            free = (e_np - e_p) / e_p
+        target_dir, basename = prepare_target_name(h, target_dir='free_energy')
+        basename = 'FreeEnergy_' + basename
+        save_scalar_cube(free, 'E_free', os.path.join(target_dir, basename))
+        basename += '.npy'
+        np.save(os.path.join(target_dir, basename), free)
+    return None
+
+
 def box2curl2vtk(filename, field_name):
     """CONVERTS GX BOX TO VTK CURL"""
     target_dir, basename = prepare_target_name(filename, target_dir='vtk_curl')
     vx, vy, vz = field_from_box(filename)
     cx, cy, cz = curl(vx, vy, vz)
+    
     average_angle = np.mean(directions_closure(angles(vx, vy, vz, cx, cy, cz)))
     print(f'Average angle between field and curl: {average_angle}')
     save_vector_data(cx, cy, cz, field_name, os.path.join(target_dir, basename))
@@ -114,7 +162,7 @@ def convert_folder(path, field_name, func=box2vtk, filter='.sav', n_jobs=8):
 
 def files_list(path, filter):
     print(f'Start searching for files *{filter} in folder: {path}')
-    files = glob.glob(f'{path}/*{filter}')
+    files = sorted(glob.glob(f'{path}/*{filter}'))
     print(f'Found {len(files)} files')
     return files
 

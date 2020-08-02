@@ -6,6 +6,7 @@ from joblib import Parallel, delayed
 from magnetic.gx_box import GXBox
 from tqdm import tqdm
 from magnetic.mathops import curl, angles, directions_closure
+import re
 
 
 def save_scalar_data(s, scalar_name, filename):
@@ -14,6 +15,7 @@ def save_scalar_data(s, scalar_name, filename):
 
 
 def source_points():
+    # TODO: DEFINE GRID NEAR ENDPOINTS
     nx, ny, nz = (20, 20, 2)
     X = np.linspace(200, 400, nx)
     Y = np.linspace(200, 400, ny)
@@ -26,6 +28,24 @@ def source_points():
     data = np.ones(pts_count, dtype='float32')
     pointsToVTK('C:/AppsData/test', X, Y, Z, {'source': data})
     return None
+
+
+def read_looptrace(filename):
+    """READ LOOPTRACING_AUTO4  OUTPUT FILE"""
+    loops = {}
+    endpoints = {}
+    with open(filename, 'r') as f:
+        for line in f:
+            line = re.sub(' +', ' ', line)
+            data = [float(x) for x in line.split()]
+            key = int(data[0])
+            if key not in loops.keys():
+                loops[key] = [[data[1], data[2]]]
+            else:
+                loops[key].append([data[1], data[2]])
+    for key in loops.keys():
+        endpoints[key] = [loops[key][0], loops[key][-1]]
+    return loops, endpoints
 
 
 def save_scalar_cube(cube, data_name, filename, origin=(0., 0., 0.), spacing=(1., 1., 1.)):

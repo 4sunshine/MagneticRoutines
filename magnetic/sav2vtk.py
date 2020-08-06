@@ -33,6 +33,18 @@ def source_points(filename, savefile, radius=5, density=3, z_level=5):
     return None
 
 
+def regular_grid(savefile, step=20, z=5, size=400, margin=5):
+    n = size // step
+    X = np.linspace(margin, size-margin, n)
+    Y = np.linspace(margin, size-margin, n)
+    Z = np.array([z])
+    X, Y, Z = np.meshgrid(X, Y, Z)
+    X, Y, Z = X.flatten(), Y.flatten(), Z.flatten()
+    data = np.ones(np.shape(X)[0])
+    pointsToVTK(savefile, X, Y, Z, {'source': data})
+    return None
+
+
 def spherical_grid(x0, y0, z0, r, density):
     # RETURNS SEMI-SPHERICAL GRID
     theta = np.linspace(0, np.pi, density, endpoint=False)

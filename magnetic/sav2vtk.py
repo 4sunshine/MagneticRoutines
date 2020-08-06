@@ -6,6 +6,7 @@ from joblib import Parallel, delayed
 from magnetic.gx_box import GXBox
 from tqdm import tqdm
 from magnetic.mathops import curl, angles, directions_closure
+import re
 
 
 def save_scalar_data(s, scalar_name, filename):
@@ -13,19 +14,56 @@ def save_scalar_data(s, scalar_name, filename):
     return None
 
 
-def source_points():
-    nx, ny, nz = (5, 5, 1)
-    X = np.linspace(100, 300, nx)
-    Y = np.linspace(100, 300, ny)
-    Z = np.linspace(10, 30, nz)
-    X, Y, Z = np.meshgrid(X, Y, Z)
-    X = X.flatten()
-    Y = Y.flatten()
-    Z = Z.flatten()
-    pts_count = np.shape(X)[0]
-    data = np.ones(pts_count, dtype='float32')
-    pointsToVTK('/home/sunshine/data/2017_09_04/test_low', X, Y, Z, {'source': data})
+def source_points(filename, savefile, radius=5, density=3, z_level=5):
+    _, endpoints = read_looptrace(filename)
+    X = []
+    Y = []
+    Z = []
+    for _, v in endpoints.items():
+        for xy in v:
+            x, y, z = spherical_grid(xy[0], xy[1], z_level, radius, density)
+            X.append(x)
+            Y.append(y)
+            Z.append(z)
+    X = np.array(X).flatten()
+    Y = np.array(Y).flatten()
+    Z = np.array(Z).flatten()
+    data = np.ones(np.shape(X)[0])
+    pointsToVTK(savefile, X, Y, Z, {'source': data})
     return None
+
+
+def spherical_grid(x0, y0, z0, r, density):
+    # RETURNS SEMI-SPHERICAL GRID
+    theta = np.linspace(0, np.pi, density, endpoint=False)
+    phi = np.linspace(0, 2 * np.pi, density, endpoint=False)
+    theta, phi = np.meshgrid(theta, phi)
+    X = r * np.cos(theta) * np.cos(phi) + x0
+    Y = r * np.cos(theta) * np.sin(phi) + y0
+    Z = r * np.sin(theta) + z0
+    # POLAR POINTS
+    np.append(X, [x0])
+    np.append(Y, [y0])
+    np.append(Z, [z0 + r])
+    return X.flatten(), Y.flatten(), Z.flatten()
+
+
+def read_looptrace(filename):
+    """READ LOOPTRACING_AUTO4  OUTPUT FILE"""
+    loops = {}
+    endpoints = {}
+    with open(filename, 'r') as f:
+        for line in f:
+            line = re.sub(' +', ' ', line)
+            data = [float(x) for x in line.split()]
+            key = int(data[0])
+            if key not in loops.keys():
+                loops[key] = [[data[1], data[2]]]
+            else:
+                loops[key].append([data[1], data[2]])
+    for key in loops.keys():
+        endpoints[key] = [loops[key][0], loops[key][-1]]
+    return loops, endpoints
 
 
 def save_scalar_cube(cube, data_name, filename, origin=(0., 0., 0.), spacing=(1., 1., 1.)):

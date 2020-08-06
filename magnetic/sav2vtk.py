@@ -14,9 +14,9 @@ def save_scalar_data(s, scalar_name, filename):
 
 
 def source_points():
-    nx, ny, nz = (20, 20, 2)
-    X = np.linspace(200, 400, nx)
-    Y = np.linspace(200, 400, ny)
+    nx, ny, nz = (5, 5, 1)
+    X = np.linspace(100, 300, nx)
+    Y = np.linspace(100, 300, ny)
     Z = np.linspace(10, 30, nz)
     X, Y, Z = np.meshgrid(X, Y, Z)
     X = X.flatten()
@@ -24,7 +24,7 @@ def source_points():
     Z = Z.flatten()
     pts_count = np.shape(X)[0]
     data = np.ones(pts_count, dtype='float32')
-    pointsToVTK('C:/AppsData/test', X, Y, Z, {'source': data})
+    pointsToVTK('/home/sunshine/data/2017_09_04/test_low', X, Y, Z, {'source': data})
     return None
 
 

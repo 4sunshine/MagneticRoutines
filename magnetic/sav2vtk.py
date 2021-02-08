@@ -7,6 +7,24 @@ from magnetic.gx_box import GXBox
 from tqdm import tqdm
 from magnetic.mathops import curl, angles, directions_closure
 import re
+import scipy.io as scio
+
+
+def get_image2_from_sav(filename):
+    try:
+        return scio.readsav(filename).IMAGE2
+    except Exception:
+        print(f'SAV file {filename} has no IMAGE2 data!')
+        return None
+
+
+def clip_neg_and_max_divide(images: list):
+    images = np.array(images)
+    images = np.clip(images, 0, np.max(images))
+    max_per_frame = np.max(images, axis=(1, 2), keepdims=True)
+    images = images / max_per_frame
+    images *= 255
+    return np.round(images).astype(np.uint8)
 
 
 def save_scalar_data(s, scalar_name, filename):
@@ -70,11 +88,12 @@ def read_looptrace(filename):
             data = [float(x) for x in line.split()]
             key = int(data[0])
             if key not in loops.keys():
-                loops[key] = [[data[1], data[2]]]
+                loops[key] = {'points': [[data[1], data[2]]], 'signal': [data[3]]}
             else:
-                loops[key].append([data[1], data[2]])
+                loops[key]['points'].append([data[1], data[2]])
+                loops[key]['signal'].append(data[3])
     for key in loops.keys():
-        endpoints[key] = [loops[key][0], loops[key][-1]]
+        endpoints[key] = [loops[key]['points'][0], loops[key]['points'][-1]]
     return loops, endpoints
 
 

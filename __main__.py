@@ -4,12 +4,26 @@ import numpy as np
 import cv2
 from glob import glob
 import json
-from magnetic.utils import save_targets_images
+from magnetic.utils import save_targets_images, plot_data
 from magnetic.mathops import curl
+import scipy.io as scio
 
 
 if __name__ == '__main__':
-    save_targets_images()
+    # save_targets_images()
+    CURL_TO_AMPERE = 3 * 1.e9 / np.pi
+    LINE = 94
+    target_dir = f'/media/sunshine/HDD/Loops/target_loops_circles_{LINE}'
+    begin_currents = np.load(os.path.join(target_dir, f'begin_currents_{LINE}.npy'))
+    end_currents = np.load(os.path.join(target_dir, f'end_currents_{LINE}.npy'))
+    print(begin_currents[:, 1])
+    print(end_currents[:, 1])
+    print(begin_currents[:, 1] - end_currents[:, 1])
+    for i in range(3):
+        data = np.array([begin_currents[:, i], end_currents[:, i], begin_currents[:, i] - end_currents[:, i]])
+        data *= CURL_TO_AMPERE
+        plot_data(data, os.path.join(target_dir, f'save_{i}.png'))
+    # save_targets_images()
     # print('Hello')
     # looptrace = '/media/sunshine/HDD/Loops/loops_final_94/traces_AIA_94NORH_NLFFFE_170904_055842.dat'
     # loops, ends = read_looptrace(looptrace)

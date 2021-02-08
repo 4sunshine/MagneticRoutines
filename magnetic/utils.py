@@ -4,6 +4,36 @@ from magnetic.sav2vtk import *
 import json
 import os
 from glob import glob
+import matplotlib.pyplot as plt
+from matplotlib import spines
+from tqdm import tqdm
+
+
+def plot_data(data, save_path):
+    """Data should have the shape: [Len_data, N_lines]"""
+    # fig, ax = plt.subplots(nrows=1, ncols=1)
+    channel_colors = ['#00ff00', '#0000ff', '#000000']
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)  # nrows, ncols, index
+    ax.set_xlabel('frame #')
+    ax.set_ylabel('I, A')
+    ax.set_facecolor('white')
+    for child in ax.get_children():
+        if isinstance(child, spines.Spine):
+            child.set_color('black')
+    ax.tick_params(axis='x', colors='black')
+    ax.tick_params(axis='y', colors='black')
+    ax.yaxis.label.set_color('black')
+    ax.xaxis.label.set_color('black')
+    fig.patch.set_facecolor('white')
+    plt.xlim(0, 37)
+    #plt.ylim(100, 255)
+    #data_len, n_lines = np.shape(data)[:2]
+    for i in range(len(data)):
+        plt.plot(data[i], color=channel_colors[i])
+        #plt.plot(data_len - 1, data[-1, i], color=channel_colors[i], marker='o')
+    plt.savefig(save_path)
+    plt.close()
 
 
 def put_text(image, text, color=(255, 255, 255), origin=(0, 1), thickness=2):
@@ -99,11 +129,11 @@ def save_images():
 
 
 def save_targets_images():
-    RADIUS = 3
+    RADIUS = 5
     BRIGHTEST_YELLOWS = ((0, 255, 255), (0, 124, 255), (255, 158, 0))
-    LINE = 131
+    LINE = 94
 
-    target_dir = f'/media/sunshine/HDD/Loops/target_loops_{LINE}'
+    target_dir = f'/media/sunshine/HDD/Loops/target_loops_circles_{LINE}'
     os.makedirs(target_dir, exist_ok=True)
     savs_94 = sorted(glob('/media/sunshine/HDD/Loops/loops_final_94/*.sav'))[:]
     savs_131 = sorted(glob('/media/sunshine/HDD/Loops/loops_final_131/*.sav'))[:]
@@ -209,6 +239,7 @@ def save_targets_images():
 
         for j, t_l in enumerate(target_loops):
             result = cv2.polylines(result, [t_l], False, BRIGHTEST_YELLOWS[j], 2)
+            result = cv2.circle(result, (t_l[0, 0], t_l[0, 1]), RADIUS, BRIGHTEST_YELLOWS[j])
             result = put_text(result, f'{j}', color=BRIGHTEST_YELLOWS[j], origin=(t_l[0, 0] / w, t_l[0, 1] / h),
                               thickness=1)
             begin_pos = t_l[0]
@@ -228,7 +259,7 @@ def save_targets_images():
         result = put_text(result, 'AIA_131', color=(0, 0, 255), origin=(0.6, 0.95))
         # result = put_text(result, 'CurlB_z', color=(255, 255, 255), origin=(0.8, 0.95))
         result = put_text(result, t, origin=(0, 0.95))
-        # cv2.imwrite(os.path.join(target_dir, f'{i:03d}.png'), result)
+        cv2.imwrite(os.path.join(target_dir, f'{i:03d}.png'), result)
 
     begin_currents = np.array(begin_currents)
     end_currents = np.array(end_currents)

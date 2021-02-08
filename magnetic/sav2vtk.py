@@ -10,6 +10,14 @@ import re
 import scipy.io as scio
 
 
+def get_curl_from_np_box(filename):
+    data = np.load(filename)
+    bx = data[..., 0]
+    by = data[..., 1]
+    bz = data[..., 2]
+    return curl(bx, by, bz)
+
+
 def get_image2_from_sav(filename):
     try:
         return scio.readsav(filename).IMAGE2

@@ -10,10 +10,12 @@ import scipy.io as scio
 
 
 if __name__ == '__main__':
-    # save_targets_images()
+    LINE = 131
+    target_dir = f'/media/sunshine/HDD/Loops/target_loops_circles_morning_deepcopy_{LINE}'
+    save_targets_images(target_dir, LINE)
+
     CURL_TO_AMPERE = 3 * 1.e9 / np.pi
-    LINE = 94
-    target_dir = f'/media/sunshine/HDD/Loops/target_loops_circles_{LINE}'
+
     begin_currents = np.load(os.path.join(target_dir, f'begin_currents_{LINE}.npy'))
     end_currents = np.load(os.path.join(target_dir, f'end_currents_{LINE}.npy'))
     print(begin_currents[:, 1])

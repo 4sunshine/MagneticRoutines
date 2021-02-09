@@ -40,6 +40,29 @@ def save_scalar_data(s, scalar_name, filename):
     return None
 
 
+def loops_to_vtk_sources(loops, savefile, radius=5, density=3, z_level=5):
+    X = []
+    Y = []
+    Z = []
+
+    for j, t_l in enumerate(loops):
+        x, y, z = spherical_grid(t_l[0, 0], t_l[0, 1], z_level, radius, density)
+        X.append(x)
+        Y.append(y)
+        Z.append(z)
+        x, y, z = spherical_grid(t_l[-1, 0], t_l[-1, 1], z_level, radius, density)
+        X.append(x)
+        Y.append(y)
+        Z.append(z)
+
+    X = np.array(X).flatten()
+    Y = np.array(Y).flatten()
+    Z = np.array(Z).flatten()
+    data = np.ones(np.shape(X)[0])
+    pointsToVTK(savefile, X, Y, Z, {'source': data})
+    return None
+
+
 def source_points(filename, savefile, radius=5, density=3, z_level=5):
     _, endpoints = read_looptrace(filename)
     X = []

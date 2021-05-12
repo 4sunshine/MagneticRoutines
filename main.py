@@ -7,24 +7,35 @@ import json
 from magnetic.utils import save_targets_images, plot_data
 from magnetic.mathops import curl
 import scipy.io as scio
+from magnetic.utils import get_times_from_folder, rename_files_accordingly_to_timecodes
 
 
 if __name__ == '__main__':
-    LINE = 131
-    target_dir = f'/media/sunshine/HDD/Loops/target_loops_circles_morning_deepcopy_{LINE}'
-    save_targets_images(target_dir, LINE)
+    convert_folder('/media/sunshine/HDD/thz_events/20120704/NLFFFE_sav', 'jB_closure', func=box2directions2vtk, n_jobs=8)
 
-    CURL_TO_AMPERE = 3 * 1.e9 / np.pi
+    # subfolders = glob('/media/sunshine/HDD/thz_events/20120704/*/')
+    # rename_files_accordingly_to_timecodes('/media/sunshine/HDD/thz_events/20120704/timecodes.json', subfolders)
+    #get_times_from_folder('/media/sunshine/HDD/thz_events/20120704/NLFFFE_sav')
+    #get_image2_from_sav('/media/sunshine/HDD/thz_events/20120704/BASEMAPS/AIA_94NLFFFE_120703_213425.sav')
+    #box2vtk('/media/sunshine/HDD/thz_events/20120704/NLFFFE_sav/NLFFFE_120704_164625.sav', 'B_nlfffe')
+    #convert_folder('/media/sunshine/HDD/thz_events/20120704', 'curl_B', func=box2curl2vtk, n_jobs=6, last=6)
 
-    begin_currents = np.load(os.path.join(target_dir, f'begin_currents_{LINE}.npy'))
-    end_currents = np.load(os.path.join(target_dir, f'end_currents_{LINE}.npy'))
-    print(begin_currents[:, 1])
-    print(end_currents[:, 1])
-    print(begin_currents[:, 1] - end_currents[:, 1])
-    for i in range(3):
-        data = np.array([begin_currents[:, i], end_currents[:, i], begin_currents[:, i] - end_currents[:, i]])
-        data *= CURL_TO_AMPERE
-        plot_data(data, os.path.join(target_dir, f'save_{i}.png'))
+
+    # LINE = 131
+    # target_dir = f'/media/sunshine/HDD/Loops/target_loops_circles_morning_deepcopy_{LINE}'
+    # save_targets_images(target_dir, LINE)
+    #
+    # CURL_TO_AMPERE = 3 * 1.e9 / np.pi
+    #
+    # begin_currents = np.load(os.path.join(target_dir, f'begin_currents_{LINE}.npy'))
+    # end_currents = np.load(os.path.join(target_dir, f'end_currents_{LINE}.npy'))
+    # print(begin_currents[:, 1])
+    # print(end_currents[:, 1])
+    # print(begin_currents[:, 1] - end_currents[:, 1])
+    # for i in range(3):
+    #     data = np.array([begin_currents[:, i], end_currents[:, i], begin_currents[:, i] - end_currents[:, i]])
+    #     data *= CURL_TO_AMPERE
+    #     plot_data(data, os.path.join(target_dir, f'save_{i}.png'))
     # save_targets_images()
     # print('Hello')
     # looptrace = '/media/sunshine/HDD/Loops/loops_final_94/traces_AIA_94NORH_NLFFFE_170904_055842.dat'

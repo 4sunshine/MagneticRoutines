@@ -10,6 +10,44 @@ from tqdm import tqdm
 from copy import deepcopy
 
 
+def get_times_from_folder(path, filter='*.sav'):
+    # CONVENTION: NAME _ DATE _ TIME
+    all_files = sorted(glob(path + '/' + filter))
+    dates, times = [], []
+    timecodes = []
+    for i, f in enumerate(all_files):
+        basename = os.path.basename(f)
+        basename = os.path.splitext(basename)[0]
+        _, f_date, f_time = basename.split('_')[:3]
+        dates.append(f_date)
+        times.append(f_time)
+        timecodes.append(f'{i:04d}')
+    target_json_name = os.path.join(path, 'timecodes.json')
+    with open(target_json_name, 'w') as f:
+        json.dump({'times': times, 'dates': dates, 'timecodes': timecodes}, f)
+
+
+def rename_files_accordingly_to_timecodes(timecodes_file, folders):
+    with open(timecodes_file, 'r') as f:
+        data = json.load(f)
+    times = data['times']
+    dates = data['dates']
+    timecodes = data['timecodes']
+    datetime_to_code = {}
+    for d, t, tc in zip(dates, times, timecodes):
+        datetime_to_code[f'{d}_{t}'] = tc
+
+    all_files = []
+    for folder in folders:
+        all_files += glob(folder + '/*')
+
+    for k, v in datetime_to_code.items():
+        needed_to_rename = [f for f in all_files if k in f]
+        for f in needed_to_rename:
+            new_name = f.replace(k, v, 1)
+            os.rename(f, new_name)
+
+
 def plot_data(data, save_path):
     """Data should have the shape: [Len_data, N_lines]"""
     # fig, ax = plt.subplots(nrows=1, ncols=1)

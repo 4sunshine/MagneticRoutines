@@ -26,6 +26,14 @@ def get_image2_from_sav(filename):
         return None
 
 
+def get_refmap_data_from_basemap_sav(filename):
+    try:
+        return scio.readsav(filename)['mapw']['data'][0]
+    except Exception:
+        print(f'SAV file {filename} has no basemap data!')
+        return None
+
+
 def clip_neg_and_max_divide(images: list):
     images = np.array(images)
     images = np.clip(images, 0, np.max(images))
@@ -184,8 +192,7 @@ def prepare_target_name(filename, target_dir='target'):
     basename = basename.split('.')[:-1]
     basename = ''.join(basename)  # + '.vtk'
     target_dir = os.path.join(cd, target_dir)
-    if not os.path.exists(target_dir):
-        os.makedirs(target_dir)
+    os.makedirs(target_dir, exist_ok=True)
     return target_dir, basename
 
 
@@ -252,9 +259,22 @@ def box2curl2vtk(filename, field_name):
     return None
 
 
-def convert_folder(path, field_name, func=box2vtk, filter='.sav', n_jobs=8):
+def box2directions2vtk(filename, field_name):
+    """CONVERTS GX BOX TO VTK CURL"""
+    target_dir, basename = prepare_target_name(filename, target_dir='vtk_closure')
+    vx, vy, vz = field_from_box(filename)
+    cx, cy, cz = curl(vx, vy, vz)
+
+    average_angle = directions_closure(angles(vx, vy, vz, cx, cy, cz))
+    save_scalar_cube(average_angle, field_name, os.path.join(target_dir, basename))
+    return None
+
+
+def convert_folder(path, field_name, func=box2vtk, filter='.sav', n_jobs=8, last=0):
     """YOU SHOULD SPECIFY WHAT FUNCTION TO USE IN PARALLEL"""
     files = files_list(path, filter)
+    if last > 0:
+        files = files[-last:]
     Parallel(n_jobs=n_jobs)(delayed(func)(file, field)
                             for file, field in tqdm(zip(files, [field_name]*len(files))))
     return None

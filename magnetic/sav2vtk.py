@@ -280,6 +280,19 @@ def convert_folder(path, field_name, func=box2vtk, filter='.sav', n_jobs=8, last
     return None
 
 
+def convert_folder_serial(path, field_name, func=box2vtk, filter='.sav', n_jobs=8, last=0):
+    """YOU SHOULD SPECIFY WHAT FUNCTION TO USE IN PARALLEL"""
+    files = files_list(path, filter)
+    if last > 0:
+        files = files[-last:]
+    for file, field in tqdm(zip(files, [field_name]*len(files))):
+        try:
+            func(file, field)
+        except Exception:
+            print(f'File {file} can be corrupted')
+    return None
+
+
 def files_list(path, filter):
     print(f'Start searching for files *{filter} in folder: {path}')
     files = sorted(glob.glob(f'{path}/*{filter}'))

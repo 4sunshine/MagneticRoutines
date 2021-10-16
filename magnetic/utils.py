@@ -1,3 +1,5 @@
+import sys
+
 import cv2
 import numpy as np
 from magnetic.sav2vtk import *
@@ -8,23 +10,26 @@ import matplotlib.pyplot as plt
 from matplotlib import spines
 from tqdm import tqdm
 from copy import deepcopy
+from PIL import Image, ImageFont, ImageDraw
 
 
-def get_times_from_folder(path, filter='*.sav'):
+def get_times_from_folder(path, filter='*.sav', only_filename_return=False):
     # CONVENTION: NAME _ DATE _ TIME
-    all_files = sorted(glob(path + '/' + filter))
-    dates, times = [], []
-    timecodes = []
-    for i, f in enumerate(all_files):
-        basename = os.path.basename(f)
-        basename = os.path.splitext(basename)[0]
-        _, f_date, f_time = basename.split('_')[:3]
-        dates.append(f_date)
-        times.append(f_time)
-        timecodes.append(f'{i:04d}')
     target_json_name = os.path.join(path, 'timecodes.json')
-    with open(target_json_name, 'w') as f:
-        json.dump({'times': times, 'dates': dates, 'timecodes': timecodes}, f)
+    if not only_filename_return:
+        all_files = sorted(glob(path + '/' + filter))
+        dates, times = [], []
+        timecodes = []
+        for i, f in enumerate(all_files):
+            basename = os.path.basename(f)
+            basename = os.path.splitext(basename)[0]
+            _, f_date, f_time = basename.split('_')[:3]
+            dates.append(f_date)
+            times.append(f_time)
+            timecodes.append(f'{i:04d}')
+        with open(target_json_name, 'w') as f:
+            json.dump({'times': times, 'dates': dates, 'timecodes': timecodes}, f)
+    return target_json_name
 
 
 def rename_files_accordingly_to_timecodes(timecodes_file, folders):
@@ -46,6 +51,45 @@ def rename_files_accordingly_to_timecodes(timecodes_file, folders):
         for f in needed_to_rename:
             new_name = f.replace(k, v, 1)
             os.rename(f, new_name)
+
+
+def rename_files_by_timecodes(timecodes_file, folder):
+    with open(timecodes_file, 'r') as f:
+        data = json.load(f)
+    times = data['times']
+    dates = data['dates']
+    timecodes = data['timecodes']
+    datetime_to_code = {}
+    for i, (d, t, tc) in enumerate(zip(dates, times, timecodes)):
+        datetime_to_code[i] = f'{d}_{t}'
+    all_files = sorted(os.listdir(folder))
+    for i, f in enumerate(all_files):
+        _, ext = os.path.splitext(f)
+        new_name = f'{datetime_to_code[i]}{ext}'
+        os.rename(os.path.join(folder, f), os.path.join(folder, new_name))
+
+
+def datetime_format(solar_string):
+    date, time = solar_string.split('_')
+    date = '20' + date[:2] + '-' + date[2:4] + '-' + date[-2:]
+    time = time[:2] + ':' + time[2:4] + ':' + time[-2:] + ' UTC'
+    return date, time
+
+
+def add_pil_name(folder):
+    SIZE = 32
+    all_files = sorted(os.listdir(folder))
+    for f in all_files:
+        text, _ = os.path.splitext(f)
+        date, time = datetime_format(text)
+        text = f'{date}\n{time}'
+        img = Image.open(os.path.join(folder, f))
+        draw = ImageDraw.Draw(img)
+        # font = ImageFont.truetype(<font-file>, <font-size>)
+        font = ImageFont.truetype("NotoSansJP-Medium.otf", SIZE)
+        # draw.text((x, y),"Sample Text",(r,g,b))
+        draw.text((SIZE, 0), text, (255, 255, 255), font=font)
+        img.save(os.path.join(folder, f))
 
 
 def plot_data(data, save_path):
@@ -320,3 +364,17 @@ def save_targets_images(target_dir, LINE):
     # with open(os.path.join(target_dir, f'begin_currents_{LINE}.npy'), 'wb') as f:
     np.save(os.path.join(target_dir, f'begin_currents_{LINE}.npy'), begin_currents)
     np.save(os.path.join(target_dir, f'end_currents_{LINE}.npy'), end_currents)
+
+
+def main():
+    base_dir = sys.argv[1]
+    subdirs = sorted(os.listdir(base_dir))
+    subdirs = [s for s in subdirs if os.path.isdir(os.path.join(base_dir, s))]
+    for subdir in subdirs:
+        time_file = get_times_from_folder(os.path.join(base_dir, subdir, 'b_vtk_field'),
+                                          filter='*.vtr', only_filename_return=True)
+        rename_files_accordingly_to_timecodes(time_file, [os.path.join(base_dir, subdir, 'BASEMAPS')])
+
+
+if __name__ == '__main__':
+    main()

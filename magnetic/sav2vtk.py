@@ -259,6 +259,16 @@ def box2curl2vtk(filename, field_name):
     return None
 
 
+def box2curl2grid(filename, origin=(0, 0, 0), spacing=(1, 1, 1)):
+    vx, vy, vz = field_from_box(filename)
+    cx, cy, cz = curl(vx, vy, vz)
+
+    X = np.arange(origin[0], np.shape(vx)[0], spacing[0], dtype='float64')
+    Y = np.arange(origin[1], np.shape(vx)[1], spacing[1], dtype='float64')
+    Z = np.arange(origin[2], np.shape(vx)[2], spacing[2], dtype='float64')
+    return (cx, cy, cz), (X, Y, Z)
+
+
 def box2directions2vtk(filename, field_name):
     """CONVERTS GX BOX TO VTK CURL"""
     target_dir, basename = prepare_target_name(filename, target_dir='vtk_closure')

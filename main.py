@@ -41,7 +41,8 @@ def plane_vw(plane_normal):
 def visualize_data(filename):
     axes = ['r', 'phi', 'z']
     data = np.load(filename, allow_pickle=True)
-    print(data)
+    # data = np.transpose(data, (1, 0, 2))
+    print(data.shape)
     mins = np.min(data, axis=(0, 1), keepdims=True)
     maxs = np.max(data, axis=(0, 1), keepdims=True)
     vis = 255 * (data - mins) / (maxs - mins)
@@ -60,8 +61,8 @@ def visualize_data(filename):
 
 if __name__ == '__main__':
     filename_field = sys.argv[1]
-    visualize_data(filename_field)
-    raise
+    # visualize_data(filename_field)
+
     filename_csv = sys.argv[2]
     curl, grid = box2curl2grid(filename_field)
     cx, cy, cz = curl
@@ -99,7 +100,7 @@ if __name__ == '__main__':
 
     val_cylindrical = np.concatenate([val_r, val_phi, val_n], axis=1)
 
-    CUT_RADIUS = 15
+    CUT_RADIUS = 14
 
     print(p_n)
     print(p_v)
@@ -108,24 +109,48 @@ if __name__ == '__main__':
 
     from scipy.interpolate import LinearNDInterpolator
 
-    regular_points = np.arange(-CUT_RADIUS, CUT_RADIUS + 0.125, 0.125)
+    regular_points = np.arange(-CUT_RADIUS, CUT_RADIUS + 1)
     V_NEW, W_NEW = np.meshgrid(regular_points, regular_points)
     interp_r = LinearNDInterpolator(list(zip(vw_coords[:, 0], vw_coords[:, 1])), val_cylindrical[:, 0])
     interp_phi = LinearNDInterpolator(list(zip(vw_coords[:, 0], vw_coords[:, 1])), val_cylindrical[:, 1])
     interp_n = LinearNDInterpolator(list(zip(vw_coords[:, 0], vw_coords[:, 1])), val_cylindrical[:, 2])
 
-    R_VAL = interp_r(V_NEW, W_NEW)[..., None]
-    PHI_VAL = interp_phi(V_NEW, W_NEW)[..., None]
-    N_VAL = interp_n(V_NEW, W_NEW)[..., None]
+    V_NEW = V_NEW.astype(np.float64)
+    W_NEW = W_NEW.astype(np.float64)
+
+    R_VAL = interp_r(V_NEW, W_NEW)[..., None].astype(np.float64)
+    PHI_VAL = interp_phi(V_NEW, W_NEW)[..., None].astype(np.float64)
+    N_VAL = interp_n(V_NEW, W_NEW)[..., None].astype(np.float64)
+
+    #print(V_NEW * N_VAL)
+
+    N_VAL = N_VAL[..., 0]
+
+    # V_C = np.sum(V_NEW * (N_VAL - np.min(N_VAL))) / np.sum((N_VAL - np.min(N_VAL)))
+    # W_C = np.sum(W_NEW * (N_VAL - np.min(N_VAL))) / np.sum((N_VAL - np.min(N_VAL)))
+
+    V_C, W_C = 2.7567683836490704, 0.5224803310849225  # CUT RADIUS 14
+
+    print('center: ', V_C, W_C)
+
+    # RE-INTERPOLATE AFTER FIRST ESTIMATION
+
+    V_NEW = V_NEW.astype(np.float64) + V_C
+    W_NEW = W_NEW.astype(np.float64) + W_C
+
+    R_VAL = interp_r(V_NEW, W_NEW)[..., None].astype(np.float64)
+    PHI_VAL = interp_phi(V_NEW, W_NEW)[..., None].astype(np.float64)
+    N_VAL = interp_n(V_NEW, W_NEW)[..., None].astype(np.float64)
+
     result = np.concatenate([R_VAL, PHI_VAL, N_VAL], axis=-1)
 
-    np.save(os.path.join(os.path.dirname(filename_csv),
-                         os.path.splitext(os.path.basename(filename_csv))[0] + '_planar_s125.npy'), result)
-    print(result.shape)
+    #np.save(os.path.join(os.path.dirname(filename_csv),
+    #                     os.path.splitext(os.path.basename(filename_csv))[0] + '_planar_29.npy'), result)
+
 
 
     #print(centered_grid)
-    print(slice_values.shape)
+    print(result.shape)
     raise
 
 

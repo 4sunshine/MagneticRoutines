@@ -59,9 +59,49 @@ def visualize_data(filename):
     print(data.shape)
 
 
+def visualize_plot(filename_1, filename_2):
+    data_b = np.load(filename_1, allow_pickle=True).item()
+    data_j = np.load(filename_2, allow_pickle=True).item()
+
+    print(data_j)
+    print(data_b)
+    b_z = data_b['b_z']
+    b_phi = 180 * data_b['b_phi'] / np.pi
+    j_z = data_j['j_z']
+    j_phi = 180 * data_j['j_phi'] / np.pi
+    xs = np.arange(len(b_z))
+    import matplotlib.pyplot as plt
+
+    plt.axis([0, len(b_z), -250, 250])
+    plt.xlabel('r, px', fontsize=18)
+    plt.ylabel('Conventional units', fontsize=18)
+
+    plt.plot(xs, b_z)
+    plt.plot(xs, b_phi)
+    plt.plot(xs, j_z)
+    plt.plot(xs, j_phi)
+    plt.legend(['b_z', 'b_phi', 'j_z', 'j_phi'], loc='upper right')
+
+    plt.savefig(os.path.join(os.path.dirname(filename_1), 'fields.png'))
+
+    ### CSV GEN
+    import csv
+    with open(os.path.join(os.path.dirname(filename_1), 'fields.csv'), 'w') as f:
+        w = csv.writer(f)
+        w.writerow(('b_z, G', 'b_phi, deg', 'j_z, G/px', 'j_phi, deg', 'r, px'))
+        for i in range(len(b_z)):
+            w.writerow([b_z[i], b_phi[i], j_z[i], j_phi[i], i])
+
+
+    print(xs)
+
+
+
 if __name__ == '__main__':
     filename_field = sys.argv[1]
-    # visualize_data(filename_field)
+    f2 = sys.argv[2]
+    visualize_plot(filename_field, f2)
+    raise
 
     filename_csv = sys.argv[2]
     curl, grid = box2curl2grid(filename_field)
@@ -73,8 +113,8 @@ if __name__ == '__main__':
 
     slice_data = pd.read_csv(filename_csv)
 
-    slice_values = np.array(slice_data.values, dtype=np.float64)[:, 3:6]
-    slice_grid = np.array(slice_data.values, dtype=np.float64)[:, :3]
+    slice_values = np.array(slice_data.values, dtype=np.float64)[:, :3]
+    slice_grid = np.array(slice_data.values, dtype=np.float64)[:, 3:6]
 
     # PLANE R0, NORMAL
     central_point = np.array([190., 260., 15.], dtype=np.float64)
@@ -144,13 +184,43 @@ if __name__ == '__main__':
 
     result = np.concatenate([R_VAL, PHI_VAL, N_VAL], axis=-1)
 
-    #np.save(os.path.join(os.path.dirname(filename_csv),
-    #                     os.path.splitext(os.path.basename(filename_csv))[0] + '_planar_29.npy'), result)
+    V_NEW = V_NEW - V_C
+    W_NEW = W_NEW - W_C
+    VW = np.concatenate([V_NEW[..., None], W_NEW[..., None]], axis=-1)
+
+    print(VW.shape)
+
+    VW_r = np.linalg.norm(VW, axis=-1, keepdims=False)
+
+    N_VAL = N_VAL[..., 0]
+    PHI_VAL = PHI_VAL[..., 0]
+
+    fn = []
+    fphi = []
+    for i in range(CUT_RADIUS):
+        r_cur = np.where((VW_r >= i) & (VW_r < (i + 1)))
+        n_cur = N_VAL[r_cur]
+        phi_cur = PHI_VAL[r_cur]
+        fn.append(np.mean(n_cur))
+        fphi.append(np.mean(phi_cur))
+
+    data = {'b_phi': np.array(fphi), 'b_z': np.array(fn)}
+    #
+    # print(fn)
+    # print(fphi)
+    #
+    # bins = np.arange(CUT_RADIUS)
+    # print(VW_r.shape)
+    # print(N_VAL.shape)
+    # val_phi = np.arctan2(val_w, val_v)
+
+    np.save(os.path.join(os.path.dirname(filename_csv),
+                         os.path.splitext(os.path.basename(filename_csv))[0] + '_data_29.npy'), data, allow_pickle=True)
 
 
 
     #print(centered_grid)
-    print(result.shape)
+    #print(result.shape)
     raise
 
 

@@ -99,9 +99,16 @@ def visualize_plot(filename_1, filename_2):
 
 if __name__ == '__main__':
     filename_field = sys.argv[1]
-    f2 = sys.argv[2]
-    visualize_plot(filename_field, f2)
-    raise
+    #f2 = sys.argv[2]
+    #visualize_plot(filename_field, f2)
+    #raise
+
+    # V --> OX, W --> OY, N --> OZ
+
+    def curl_to_j(curl_val):
+        # J = [Field(G)] * c (== 300 000 km/s) / 4Pi / (pixel_size == 400km)
+        j_cgse_coeff = (300_000 / 4 / np.pi / 400)
+        return curl_val * j_cgse_coeff
 
     filename_csv = sys.argv[2]
     curl, grid = box2curl2grid(filename_field)
@@ -126,6 +133,8 @@ if __name__ == '__main__':
     v_coords = centered_grid @ p_v[:, None]
     w_coords = centered_grid @ p_w[:, None]
     n_coords = centered_grid @ p_n[:, None]
+
+    # TODO: VWN should be interpolated
 
     vw_coords = np.concatenate([v_coords, w_coords], axis=1)
 
@@ -191,6 +200,14 @@ if __name__ == '__main__':
     print(VW.shape)
 
     VW_r = np.linalg.norm(VW, axis=-1, keepdims=False)
+    # e_phi(tau) = (-sin_phi, cos_phi)
+    # e_normal = (cos_phi, sin_phi)
+    VW_cos_phi = V_NEW / VW_r
+    VW_sin_phi = W_NEW / VW_r
+
+    print(VW_cos_phi)
+    print(VW_sin_phi)
+    raise
 
     N_VAL = N_VAL[..., 0]
     PHI_VAL = PHI_VAL[..., 0]

@@ -63,35 +63,36 @@ def visualize_plot(filename_1, filename_2):
     data_b = np.load(filename_1, allow_pickle=True).item()
     data_j = np.load(filename_2, allow_pickle=True).item()
 
-    print(data_j)
-    print(data_b)
-    b_z = data_b['b_z']
-    b_phi = 180 * data_b['b_phi'] / np.pi
-    j_z = data_j['j_z']
-    j_phi = 180 * data_j['j_phi'] / np.pi
-    xs = np.arange(len(b_z))
+    bz, d_bz = data_b['b_z']
+    b_phi, d_b_phi = data_b['b_phi']
+    jz, d_jz = data_j['j_z']
+    j_phi, d_j_phi = data_j['j_phi']
+    br, d_br = data_b['b_r']
+    jr, d_jr = data_j['j_r']
+    xs = data_b['radius']
     import matplotlib.pyplot as plt
 
-    plt.axis([0, len(b_z), -250, 250])
-    plt.xlabel('r, px', fontsize=18)
-    plt.ylabel('Conventional units', fontsize=18)
+    plt.axis([0, 6500, -300, 300])
+    plt.xlabel(f'r, km; z-height of center = {(15 + 0.52) * 400:.0f} km', fontsize=18)
+    plt.ylabel('B, G; j, (Fr/s/cm^2) / 10', fontsize=18)
 
-    plt.plot(xs, b_z)
-    plt.plot(xs, b_phi)
-    plt.plot(xs, j_z)
-    plt.plot(xs, j_phi)
-    plt.legend(['b_z', 'b_phi', 'j_z', 'j_phi'], loc='upper right')
+    plt.plot(xs, bz, marker='o')
+    plt.plot(xs[1:], b_phi[1:], marker='o')
+    plt.plot(xs[1:], br[1:], marker='o')
+    plt.plot(xs, jz / 10, marker='o', linestyle='--')
+    plt.plot(xs[1:], j_phi[1:] / 10, marker='o', linestyle='--')
+    plt.plot(xs[1:], jr[1:] / 10, marker='o', linestyle='--')
+    plt.legend(['B_z', 'B_phi', 'B_r', 'j_z', 'j_phi', 'j_r'], loc='upper right')
 
-    plt.savefig(os.path.join(os.path.dirname(filename_1), 'fields.png'))
+    plt.savefig(os.path.join(os.path.dirname(filename_1), 'fields_refined.png'))
 
     ### CSV GEN
     import csv
-    with open(os.path.join(os.path.dirname(filename_1), 'fields.csv'), 'w') as f:
+    with open(os.path.join(os.path.dirname(filename_1), 'fields_refined.csv'), 'w') as f:
         w = csv.writer(f)
-        w.writerow(('b_z, G', 'b_phi, deg', 'j_z, G/px', 'j_phi, deg', 'r, px'))
-        for i in range(len(b_z)):
-            w.writerow([b_z[i], b_phi[i], j_z[i], j_phi[i], i])
-
+        w.writerow(('b_z (G)', 'b_phi (G)', 'b_r (G)', 'j_z (Fr/s/cm^2)', 'j_phi (Fr/s/cm^2)', 'j_r (Fr/s/cm^2)', 'r (km)'))
+        for i in range(len(bz)):
+            w.writerow([bz[i], b_phi[i], br[i], jz[i], j_phi[i], jr[i], xs[i]])
 
     print(xs)
 
@@ -99,9 +100,9 @@ def visualize_plot(filename_1, filename_2):
 
 if __name__ == '__main__':
     filename_field = sys.argv[1]
-    #f2 = sys.argv[2]
-    #visualize_plot(filename_field, f2)
-    #raise
+    f2 = sys.argv[2]
+    visualize_plot(filename_field, f2)
+    raise
 
     # V --> OX, W --> OY, N --> OZ
 
@@ -120,8 +121,8 @@ if __name__ == '__main__':
 
     slice_data = pd.read_csv(filename_csv)
 
-    slice_values = np.array(slice_data.values, dtype=np.float64)[:, :3]
-    slice_grid = np.array(slice_data.values, dtype=np.float64)[:, 3:6]
+    slice_values = np.array(slice_data.values, dtype=np.float64)[:, 3:6]
+    slice_grid = np.array(slice_data.values, dtype=np.float64)[:, :3]
 
     # PLANE R0, NORMAL
     central_point = np.array([190., 260., 15.], dtype=np.float64)
@@ -147,33 +148,35 @@ if __name__ == '__main__':
     val_r = np.linalg.norm(vw_val, axis=-1, keepdims=True)
     val_phi = np.arctan2(val_w, val_v)
 
+    # VWN == UVW
+    val_planar = np.concatenate([val_v, val_w, val_n], axis=1)
+
     val_cylindrical = np.concatenate([val_r, val_phi, val_n], axis=1)
 
     CUT_RADIUS = 14
-
-    print(p_n)
-    print(p_v)
-    print(p_w)
-    print(val_cylindrical.shape)
 
     from scipy.interpolate import LinearNDInterpolator
 
     regular_points = np.arange(-CUT_RADIUS, CUT_RADIUS + 1)
     V_NEW, W_NEW = np.meshgrid(regular_points, regular_points)
-    interp_r = LinearNDInterpolator(list(zip(vw_coords[:, 0], vw_coords[:, 1])), val_cylindrical[:, 0])
-    interp_phi = LinearNDInterpolator(list(zip(vw_coords[:, 0], vw_coords[:, 1])), val_cylindrical[:, 1])
-    interp_n = LinearNDInterpolator(list(zip(vw_coords[:, 0], vw_coords[:, 1])), val_cylindrical[:, 2])
+    # interp_r = LinearNDInterpolator(list(zip(vw_coords[:, 0], vw_coords[:, 1])), val_cylindrical[:, 0])
+    # interp_phi = LinearNDInterpolator(list(zip(vw_coords[:, 0], vw_coords[:, 1])), val_cylindrical[:, 1])
+    # interp_n = LinearNDInterpolator(list(zip(vw_coords[:, 0], vw_coords[:, 1])), val_cylindrical[:, 2])
+
+    interp_v = LinearNDInterpolator(list(zip(vw_coords[:, 0], vw_coords[:, 1])), val_planar[:, 0])
+    interp_w = LinearNDInterpolator(list(zip(vw_coords[:, 0], vw_coords[:, 1])), val_planar[:, 1])
+    interp_n = LinearNDInterpolator(list(zip(vw_coords[:, 0], vw_coords[:, 1])), val_planar[:, 2])
 
     V_NEW = V_NEW.astype(np.float64)
     W_NEW = W_NEW.astype(np.float64)
 
-    R_VAL = interp_r(V_NEW, W_NEW)[..., None].astype(np.float64)
-    PHI_VAL = interp_phi(V_NEW, W_NEW)[..., None].astype(np.float64)
-    N_VAL = interp_n(V_NEW, W_NEW)[..., None].astype(np.float64)
+#    R_VAL = interp_r(V_NEW, W_NEW)[..., None].astype(np.float64)
+#    PHI_VAL = interp_phi(V_NEW, W_NEW)[..., None].astype(np.float64)
+    #N_VAL = interp_n(V_NEW, W_NEW)[..., None].astype(np.float64)
 
     #print(V_NEW * N_VAL)
 
-    N_VAL = N_VAL[..., 0]
+    #N_VAL = N_VAL[..., 0]
 
     # V_C = np.sum(V_NEW * (N_VAL - np.min(N_VAL))) / np.sum((N_VAL - np.min(N_VAL)))
     # W_C = np.sum(W_NEW * (N_VAL - np.min(N_VAL))) / np.sum((N_VAL - np.min(N_VAL)))
@@ -187,17 +190,16 @@ if __name__ == '__main__':
     V_NEW = V_NEW.astype(np.float64) + V_C
     W_NEW = W_NEW.astype(np.float64) + W_C
 
-    R_VAL = interp_r(V_NEW, W_NEW)[..., None].astype(np.float64)
-    PHI_VAL = interp_phi(V_NEW, W_NEW)[..., None].astype(np.float64)
+    V_VAL = interp_v(V_NEW, W_NEW)[..., None].astype(np.float64)
+    W_VAL = interp_w(V_NEW, W_NEW)[..., None].astype(np.float64)
     N_VAL = interp_n(V_NEW, W_NEW)[..., None].astype(np.float64)
 
-    result = np.concatenate([R_VAL, PHI_VAL, N_VAL], axis=-1)
+    result = np.concatenate([V_VAL, W_VAL, N_VAL], axis=-1)
 
+    # MAKE NEW CENTER AN ORIGIN
     V_NEW = V_NEW - V_C
     W_NEW = W_NEW - W_C
     VW = np.concatenate([V_NEW[..., None], W_NEW[..., None]], axis=-1)
-
-    print(VW.shape)
 
     VW_r = np.linalg.norm(VW, axis=-1, keepdims=False)
     # e_phi(tau) = (-sin_phi, cos_phi)
@@ -205,55 +207,46 @@ if __name__ == '__main__':
     VW_cos_phi = V_NEW / VW_r
     VW_sin_phi = W_NEW / VW_r
 
-    print(VW_cos_phi)
-    print(VW_sin_phi)
-    raise
+    # BUILD TAU PROJECTION VECTORS FIELD
+    VW_TAU = np.stack([-VW_sin_phi, VW_cos_phi], axis=-1)
+    VW_RADIAL = np.stack([VW_cos_phi, VW_sin_phi], axis=-1)  # NORMAL/RADIAL DIRECTION
 
-    N_VAL = N_VAL[..., 0]
-    PHI_VAL = PHI_VAL[..., 0]
+    VAL_VW = np.concatenate([V_VAL, W_VAL], axis=-1)
+
+    # CALCULATE
+    VAL_TAU = np.nan_to_num(np.sum(VW_TAU * VAL_VW, axis=-1))
+    VAL_RADIAL = np.nan_to_num(np.sum(VW_RADIAL * VAL_VW, axis=-1))
 
     fn = []
+    d_fn = []
     fphi = []
+    d_fphi = []
+    fr = []
+    d_fr = []
+    radius = []
+    # PIXEL_SCALE = 400 km
+    PX_SCALE = 400
     for i in range(CUT_RADIUS):
+        radius.append(PX_SCALE * i)
         r_cur = np.where((VW_r >= i) & (VW_r < (i + 1)))
-        n_cur = N_VAL[r_cur]
-        phi_cur = PHI_VAL[r_cur]
-        fn.append(np.mean(n_cur))
+        z_cur = N_VAL[r_cur]
+        phi_cur = VAL_TAU[r_cur]
+        radial_cur = VAL_RADIAL[r_cur]
+        fn.append(np.mean(z_cur))
+        d_fn.append(np.std(z_cur))
         fphi.append(np.mean(phi_cur))
+        d_fphi.append(np.std(phi_cur))
+        fr.append(np.mean(radial_cur))
+        d_fr.append(np.std(radial_cur))
 
-    data = {'b_phi': np.array(fphi), 'b_z': np.array(fn)}
-    #
-    # print(fn)
-    # print(fphi)
-    #
-    # bins = np.arange(CUT_RADIUS)
-    # print(VW_r.shape)
-    # print(N_VAL.shape)
-    # val_phi = np.arctan2(val_w, val_v)
+    data = {'j_phi': [curl_to_j(np.array(fphi)), curl_to_j(np.array(d_fphi))],
+            'j_z': [curl_to_j(np.array(fn)), curl_to_j(np.array(d_fn))],
+            'j_r': [curl_to_j(np.array(fr)), curl_to_j(np.array(d_fr))],
+            'radius': np.array(radius)}
 
     np.save(os.path.join(os.path.dirname(filename_csv),
-                         os.path.splitext(os.path.basename(filename_csv))[0] + '_data_29.npy'), data, allow_pickle=True)
-
-
-
-    #print(centered_grid)
-    #print(result.shape)
-    raise
-
-
-    inter_x = RegularGridInterpolator((x, y, z), cx)
-    inter_y = RegularGridInterpolator((x, y, z), cy)
-    inter_z = RegularGridInterpolator((x, y, z), cz)
-
-    # from scipy.ndimage import gaussian_filter
-
-    # smooth = gaussian_filter(cx, sigma=1)
-
-    pts = np.array([[15.2, 16.2, 18.3], [3.3, 5.2, 7.1]])
-    print(inter_x(pts))
-    print(inter_y(pts))
-
-    print(cx.shape)
+                         os.path.splitext(os.path.basename(filename_csv))[0] + '_data_cut14.npy'),
+            data, allow_pickle=True)
 
     #main()
     # base_dir = sys.argv[1]

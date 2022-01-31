@@ -97,11 +97,93 @@ def visualize_plot(filename_1, filename_2):
     print(xs)
 
 
+def visualize_uv_data(filename_1, filename_2):
+    data_b = np.load(filename_1, allow_pickle=True)
+    data_j = np.load(filename_2, allow_pickle=True)
+    assert data_j.shape == data_b.shape
+    w, h = data_b.shape[:2]
+    ind_x, ind_y = w // 2, h // 2
+    # BEAM SIZE 3
+    # U+
+    r_b = data_b[ind_x + 1:, ind_y - 1: ind_y + 2, :]
+    r_j = data_j[ind_x + 1:, ind_y - 1: ind_y + 2, :]
+    # U-
+    l_b = data_b[:ind_x, ind_y - 1: ind_y + 2, :][::-1, ...]
+    l_j = data_j[:ind_x, ind_y - 1: ind_y + 2, :][::-1, ...]
+    # V+
+    t_b = data_b[ind_x - 1: ind_x + 2, ind_y + 1:, :]
+    t_j = data_j[ind_x - 1: ind_x + 2, ind_y + 1:, :]
+    # V-
+    b_b = data_b[ind_x - 1: ind_x + 2, :ind_y, :][:, ::-1, :]
+    b_j = data_j[ind_x - 1: ind_x + 2, :ind_y, :][:, ::-1, :]
+
+    VARS = (r_b, r_j, l_b, l_j, t_b, t_j, b_b, b_j)
+    NAMES = ('B_u+', 'j_u+', 'B_u-', 'j_u-', 'B_v+', 'j_v+', 'B_v-', 'j_v-')
+    AXIS = (1, 1, 1, 1, 0, 0, 0, 0)
+    xs = 400 * np.arange(1, w // 2 + 1)
+
+    import matplotlib.pyplot as plt
+
+    legend = []
+
+    plt.axis([0, 6900, -220, 500])
+    plt.xlabel(f'r, km; z-height of center = {(15 + 0.52) * 400:.0f} km', fontsize=18)
+    plt.ylabel('B, G; j, (Fr/s/cm^2) / 10', fontsize=18)
+
+    coords = ['phi', 'r', 'z']
+    result_names = [n[0] + c + n[1:] if i == 0 else 'd_' + n[0] + c + n[1:] for n in NAMES for c in coords for i in range(2)] +\
+                   ['r']
+    result_table = np.zeros((len(xs), len(result_names)), dtype=np.float32)
+    result_table[:, -1] = xs
+
+    for i, (var, name, ax) in enumerate(zip(VARS, NAMES, AXIS)):
+        cur_data = np.mean(var, axis=ax)
+        cur_std = np.std(var, axis=ax)
+        f_phi_r = np.copy(cur_data[:, :2])
+        f_z = np.copy(cur_data[:, 2:])
+        if i // 2 % 2 == 1:
+            f_phi_r = -f_phi_r
+        ref_data = np.concatenate([f_phi_r, f_z], axis=-1)
+        for j in range(3):
+            result_table[:, 6 * i + 2 * j] = ref_data[:, j]
+            result_table[:, 6 * i + 2 * j + 1] = cur_std[:, j]
+
+
+        if i == 0 or i == 4:
+            legend.append(name[0] + 'z' + name[1:])
+            plt.plot(xs, cur_data[:, 2], marker='o')
+            legend.append(name[0] + 'phi' + name[1:])
+            plt.plot(xs, cur_data[:, 0], marker='o')
+        elif i == 1 or i == 5:
+            legend.append(name[0] + 'z' + name[1:])
+            plt.plot(xs, cur_data[:, 2] / 10, marker='o', linestyle='--')
+            print(name)
+        #print(name)
+        #print(cur_data)
+        #print(cur_std)
+
+    print(result_table)
+
+    plt.legend(legend, loc='upper right')
+
+    plt.savefig(os.path.join(os.path.dirname(filename_1), 'fields_uv.png'))
+
+    ### CSV GEN
+    import csv
+    with open(os.path.join(os.path.dirname(filename_1), 'fields_uv.csv'), 'w') as f:
+        w = csv.writer(f)
+        w.writerow(result_names)
+        for i in range(len(xs)):
+            w.writerow(result_table[i, :])
+
+    #print(data_b)
+
+
 
 if __name__ == '__main__':
     filename_field = sys.argv[1]
     f2 = sys.argv[2]
-    visualize_plot(filename_field, f2)
+    visualize_uv_data(filename_field, f2)
     raise
 
     # V --> OX, W --> OY, N --> OZ
@@ -121,8 +203,8 @@ if __name__ == '__main__':
 
     slice_data = pd.read_csv(filename_csv)
 
-    slice_values = np.array(slice_data.values, dtype=np.float64)[:, 3:6]
-    slice_grid = np.array(slice_data.values, dtype=np.float64)[:, :3]
+    slice_values = np.array(slice_data.values, dtype=np.float64)[:, :3]
+    slice_grid = np.array(slice_data.values, dtype=np.float64)[:, 3:6]
 
     # PLANE R0, NORMAL
     central_point = np.array([190., 260., 15.], dtype=np.float64)
@@ -217,6 +299,16 @@ if __name__ == '__main__':
     VAL_TAU = np.nan_to_num(np.sum(VW_TAU * VAL_VW, axis=-1))
     VAL_RADIAL = np.nan_to_num(np.sum(VW_RADIAL * VAL_VW, axis=-1))
 
+    VALUE = np.stack([VAL_TAU, VAL_RADIAL, N_VAL[..., 0]], axis=-1)
+
+    data = VALUE
+
+    np.save(os.path.join(os.path.dirname(filename_csv),
+                         os.path.splitext(os.path.basename(filename_csv))[0] + '_data_uv_plane.npy'),
+            data, allow_pickle=True)
+
+    raise
+
     fn = []
     d_fn = []
     fphi = []
@@ -245,7 +337,7 @@ if __name__ == '__main__':
             'radius': np.array(radius)}
 
     np.save(os.path.join(os.path.dirname(filename_csv),
-                         os.path.splitext(os.path.basename(filename_csv))[0] + '_data_cut14.npy'),
+                         os.path.splitext(os.path.basename(filename_csv))[0] + '_data_cut_uv.npy'),
             data, allow_pickle=True)
 
     #main()

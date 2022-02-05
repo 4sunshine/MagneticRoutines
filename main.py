@@ -104,21 +104,21 @@ def visualize_uv_data(filename_1, filename_2):
     w, h = data_b.shape[:2]
     ind_x, ind_y = w // 2, h // 2
     # BEAM SIZE 3
-    # U+
+    # V+
     r_b = data_b[ind_x + 1:, ind_y - 1: ind_y + 2, :]
     r_j = data_j[ind_x + 1:, ind_y - 1: ind_y + 2, :]
-    # U-
+    # V-
     l_b = data_b[:ind_x, ind_y - 1: ind_y + 2, :][::-1, ...]
     l_j = data_j[:ind_x, ind_y - 1: ind_y + 2, :][::-1, ...]
-    # V+
+    # U+
     t_b = data_b[ind_x - 1: ind_x + 2, ind_y + 1:, :]
     t_j = data_j[ind_x - 1: ind_x + 2, ind_y + 1:, :]
-    # V-
+    # U-
     b_b = data_b[ind_x - 1: ind_x + 2, :ind_y, :][:, ::-1, :]
     b_j = data_j[ind_x - 1: ind_x + 2, :ind_y, :][:, ::-1, :]
 
     VARS = (r_b, r_j, l_b, l_j, t_b, t_j, b_b, b_j)
-    NAMES = ('B_u+', 'j_u+', 'B_u-', 'j_u-', 'B_v+', 'j_v+', 'B_v-', 'j_v-')
+    NAMES = ('B_v+', 'j_v+', 'B_v-', 'j_v-', 'B_u+', 'j_u+', 'B_u-', 'j_u-')
     AXIS = (1, 1, 1, 1, 0, 0, 0, 0)
     xs = 400 * np.arange(1, w // 2 + 1)
 
@@ -126,9 +126,9 @@ def visualize_uv_data(filename_1, filename_2):
 
     legend = []
 
-    plt.axis([0, 6900, -220, 500])
-    plt.xlabel(f'r, km; z-height of center = {(15 + 0.52) * 400:.0f} km', fontsize=18)
-    plt.ylabel('B, G; j, (Fr/s/cm^2) / 10', fontsize=18)
+    plt.axis([0, 6900, -700, 700])
+    plt.xlabel(f'r, km; z-height of center = {(9) * 400:.0f} km', fontsize=18)
+    plt.ylabel(r'$B, G; j_{z}, 10^{-1}  statA \cdot cm^{-2}$', fontsize=18)
 
     coords = ['phi', 'r', 'z']
     result_names = [n[0] + c + n[1:] if i == 0 else 'd_' + n[0] + c + n[1:] for n in NAMES for c in coords for i in range(2)] +\
@@ -166,11 +166,11 @@ def visualize_uv_data(filename_1, filename_2):
 
     plt.legend(legend, loc='upper right')
 
-    plt.savefig(os.path.join(os.path.dirname(filename_1), 'fields_uv.png'))
+    plt.savefig(os.path.join(os.path.dirname(filename_1), 'refined_fields_uv.png'))
 
     ### CSV GEN
     import csv
-    with open(os.path.join(os.path.dirname(filename_1), 'fields_uv.csv'), 'w') as f:
+    with open(os.path.join(os.path.dirname(filename_1), 'refined_fields_uv.csv'), 'w') as f:
         w = csv.writer(f)
         w.writerow(result_names)
         for i in range(len(xs)):
@@ -181,11 +181,52 @@ def visualize_uv_data(filename_1, filename_2):
 
 
 if __name__ == '__main__':
+    def example():
+        from scipy.interpolate import LinearNDInterpolator
+
+        import matplotlib.pyplot as plt
+
+        rng = np.random.default_rng()
+
+        x = np.arange(5)#rng.random(10) + 0.5
+
+        y = (np.arange(5) ** 2) // 10#rng.random(10) - 0.5
+
+        z = x ** 2
+
+        X = np.linspace(min(x), max(x))
+        print(X)
+
+        Y = np.linspace(min(y), max(y))
+
+        X, Y = np.meshgrid(X, Y)  # 2D grid for interpolation
+        print(X)
+        print('***')
+        print(X[0, 0])
+        print(Y)
+
+        interp = LinearNDInterpolator(list(zip(x, y)), z)
+
+        Z = interp(X, Y)
+        print(Z)
+
+        plt.pcolormesh(X, Y, Z, shading='auto')
+
+        plt.plot(x, y, "ok", label="input point")
+
+        plt.legend()
+
+        plt.colorbar()
+
+        plt.axis("equal")
+
+        plt.savefig('example.png')
+
+    #example()
     filename_field = sys.argv[1]
     f2 = sys.argv[2]
     visualize_uv_data(filename_field, f2)
     raise
-
     # V --> OX, W --> OY, N --> OZ
 
     def curl_to_j(curl_val):
@@ -203,8 +244,8 @@ if __name__ == '__main__':
 
     slice_data = pd.read_csv(filename_csv)
 
-    slice_values = np.array(slice_data.values, dtype=np.float64)[:, :3]
-    slice_grid = np.array(slice_data.values, dtype=np.float64)[:, 3:6]
+    slice_values = np.array(slice_data.values, dtype=np.float64)[:, :3] #J: 3:6
+    slice_grid = np.array(slice_data.values, dtype=np.float64)[:, 3:6] #B 3:6
 
     # PLANE R0, NORMAL
     central_point = np.array([190., 260., 15.], dtype=np.float64)
@@ -254,7 +295,9 @@ if __name__ == '__main__':
 
 #    R_VAL = interp_r(V_NEW, W_NEW)[..., None].astype(np.float64)
 #    PHI_VAL = interp_phi(V_NEW, W_NEW)[..., None].astype(np.float64)
-    #N_VAL = interp_n(V_NEW, W_NEW)[..., None].astype(np.float64)
+    N_VAL = interp_n(V_NEW, W_NEW).astype(np.float64)
+    V_VAL = interp_v(V_NEW, W_NEW).astype(np.float64)
+    W_VAL = interp_w(V_NEW, W_NEW).astype(np.float64)
 
     #print(V_NEW * N_VAL)
 
@@ -263,9 +306,12 @@ if __name__ == '__main__':
     # V_C = np.sum(V_NEW * (N_VAL - np.min(N_VAL))) / np.sum((N_VAL - np.min(N_VAL)))
     # W_C = np.sum(W_NEW * (N_VAL - np.min(N_VAL))) / np.sum((N_VAL - np.min(N_VAL)))
 
-    V_C, W_C = 2.7567683836490704, 0.5224803310849225  # CUT RADIUS 14
+    # INDEX B_MIN: [8, 10]
+    # V_c, W_c = V_NEW[8, 10], W_NEW[8, 10]
+    V_C, W_C = -4., -6.
 
-    print('center: ', V_C, W_C)
+    #V_C, W_C = 2.7567683836490704, 0.5224803310849225  # CUT RADIUS 14
+
 
     # RE-INTERPOLATE AFTER FIRST ESTIMATION
 
@@ -294,17 +340,61 @@ if __name__ == '__main__':
     VW_RADIAL = np.stack([VW_cos_phi, VW_sin_phi], axis=-1)  # NORMAL/RADIAL DIRECTION
 
     VAL_VW = np.concatenate([V_VAL, W_VAL], axis=-1)
+    print(VAL_VW)
 
     # CALCULATE
     VAL_TAU = np.nan_to_num(np.sum(VW_TAU * VAL_VW, axis=-1))
     VAL_RADIAL = np.nan_to_num(np.sum(VW_RADIAL * VAL_VW, axis=-1))
 
-    VALUE = np.stack([VAL_TAU, VAL_RADIAL, N_VAL[..., 0]], axis=-1)
+    import matplotlib.pyplot as plt
+
+    print(W_NEW + central_point[2] + W_C)
+
+    PIX_SIZE = 400
+
+    plot_W = PIX_SIZE * (W_NEW + central_point[2] + W_C)
+    plot_V = PIX_SIZE * (V_NEW)
+    inds = np.where(plot_W >= 0)
+    rope_center_x, rope_center_y =  plot_V[CUT_RADIUS, CUT_RADIUS], plot_W[CUT_RADIUS, CUT_RADIUS]
+    height = int(central_point[2] + W_C)
+    cut = CUT_RADIUS - height
+
+    print(np.min(VAL_TAU[cut:]))
+    print(np.min(N_VAL[cut:]))
+    print(np.min(VAL_RADIAL[cut:]))
+
+    print(np.max(VAL_TAU[cut:]))
+    print(np.max(N_VAL[cut:]))
+    print(np.max(VAL_RADIAL[cut:]))
+
+    plt.pcolormesh(plot_V[cut:], plot_W[cut:], VAL_TAU[cut:], shading='auto', cmap='seismic',
+                   vmin=-500, vmax=500)
+
+    plt.plot(rope_center_x, rope_center_y, "ok", label="flux rope center")
+
+    plt.legend()
+
+    from matplotlib import cm
+
+    #plt.colorbar(label=r'$j_{\varphi}, 10^{3}  statA \cdot cm^{-2}$')
+    plt.colorbar(label=r'$B_{\varphi}, G$')
+
+    #plt.colorbar(label=r'$B_{z}, G$')
+
+    plt.xlabel(r'$x, \mathit{km}$', fontsize=18)
+    plt.ylabel(r'$z, km$', fontsize=18)
+
+    plt.axis("equal")
+
+    plt.savefig(os.path.join(os.path.dirname(filename_csv),
+                         os.path.splitext(os.path.basename(filename_csv))[0] + '_phi.png'))
+
+    VALUE = np.stack([VAL_TAU, VAL_RADIAL, N_VAL[..., 0]], axis=-1)#[cut:]
 
     data = VALUE
 
     np.save(os.path.join(os.path.dirname(filename_csv),
-                         os.path.splitext(os.path.basename(filename_csv))[0] + '_data_uv_plane.npy'),
+                         os.path.splitext(os.path.basename(filename_csv))[0] + '_refined_data_uv_plane.npy'),
             data, allow_pickle=True)
 
     raise

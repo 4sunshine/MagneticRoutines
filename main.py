@@ -126,7 +126,7 @@ def visualize_uv_data(filename_1, filename_2):
 
     legend = []
 
-    plt.axis([0, 6900, -700, 700])
+    plt.axis([0, 14000, -700, 700])
     plt.xlabel(f'r, km; z-height of center = {(9) * 400:.0f} km', fontsize=18)
     plt.ylabel(r'$B, G; j_{z}, 10^{-1}  statA \cdot cm^{-2}$', fontsize=18)
 
@@ -166,11 +166,11 @@ def visualize_uv_data(filename_1, filename_2):
 
     plt.legend(legend, loc='upper right')
 
-    plt.savefig(os.path.join(os.path.dirname(filename_1), 'refined_fields_uv.png'))
+    plt.savefig(os.path.join(os.path.dirname(filename_1), 'bigger_refined_fields_uv.png'))
 
     ### CSV GEN
     import csv
-    with open(os.path.join(os.path.dirname(filename_1), 'refined_fields_uv.csv'), 'w') as f:
+    with open(os.path.join(os.path.dirname(filename_1), 'bigger_refined_fields_uv.csv'), 'w') as f:
         w = csv.writer(f)
         w.writerow(result_names)
         for i in range(len(xs)):
@@ -244,8 +244,8 @@ if __name__ == '__main__':
 
     slice_data = pd.read_csv(filename_csv)
 
-    slice_values = np.array(slice_data.values, dtype=np.float64)[:, :3] #J: 3:6
-    slice_grid = np.array(slice_data.values, dtype=np.float64)[:, 3:6] #B 3:6
+    slice_values = np.array(slice_data.values, dtype=np.float64)[:, 3:6] #J: 3:6
+    slice_grid = np.array(slice_data.values, dtype=np.float64)[:, :3] #B 3:6
 
     # PLANE R0, NORMAL
     central_point = np.array([190., 260., 15.], dtype=np.float64)
@@ -276,7 +276,7 @@ if __name__ == '__main__':
 
     val_cylindrical = np.concatenate([val_r, val_phi, val_n], axis=1)
 
-    CUT_RADIUS = 14
+    CUT_RADIUS = 28
 
     from scipy.interpolate import LinearNDInterpolator
 
@@ -367,8 +367,9 @@ if __name__ == '__main__':
     print(np.max(N_VAL[cut:]))
     print(np.max(VAL_RADIAL[cut:]))
 
-    plt.pcolormesh(plot_V[cut:], plot_W[cut:], VAL_TAU[cut:], shading='auto', cmap='seismic',
-                   vmin=-500, vmax=500)
+    plt.pcolormesh(plot_V[cut:], plot_W[cut:], curl_to_j(VAL_RADIAL[cut:]) / 1000, shading='auto', cmap='seismic',
+                   vmin=-10, vmax=10)
+                   #vmin=-500, vmax=500)
 
     plt.plot(rope_center_x, rope_center_y, "ok", label="flux rope center")
 
@@ -377,24 +378,25 @@ if __name__ == '__main__':
     from matplotlib import cm
 
     #plt.colorbar(label=r'$j_{\varphi}, 10^{3}  statA \cdot cm^{-2}$')
-    plt.colorbar(label=r'$B_{\varphi}, G$')
+    plt.colorbar(label=r'$j_{r}, 10^{3}  statA \cdot cm^{-2}$')
 
     #plt.colorbar(label=r'$B_{z}, G$')
 
     plt.xlabel(r'$x, \mathit{km}$', fontsize=18)
     plt.ylabel(r'$z, km$', fontsize=18)
 
-    plt.axis("equal")
+    #plt.axis("equal")
 
     plt.savefig(os.path.join(os.path.dirname(filename_csv),
-                         os.path.splitext(os.path.basename(filename_csv))[0] + '_phi.png'))
+                         os.path.splitext(os.path.basename(filename_csv))[0] + '_res_r.png'))
 
     VALUE = np.stack([VAL_TAU, VAL_RADIAL, N_VAL[..., 0]], axis=-1)#[cut:]
 
-    data = VALUE
+    data = curl_to_j(VALUE)
+    raise
 
     np.save(os.path.join(os.path.dirname(filename_csv),
-                         os.path.splitext(os.path.basename(filename_csv))[0] + '_refined_data_uv_plane.npy'),
+                         os.path.splitext(os.path.basename(filename_csv))[0] + '_bigger_refined_data_uv_plane.npy'),
             data, allow_pickle=True)
 
     raise

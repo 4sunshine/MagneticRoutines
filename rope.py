@@ -8,7 +8,7 @@ from magnetic.sav2vtk import GXBox
 
 class RopeFinder(nn.Module):
     def __init__(self,
-                 initial_point=(20, 20, 35),
+                 initial_point=(200, 200, 60),
                  initial_normal=(1, 1, 0),
                  min_radius=2.,
                  max_radius=20.,
@@ -20,6 +20,7 @@ class RopeFinder(nn.Module):
         Min radius is in box relative units.
         Min rope height is in radius units.
         All relative units calculated on z-axis scale.
+        Grid size in radius units.
         """
         super(RopeFinder, self).__init__()
         self.field_shape = field_shape
@@ -30,23 +31,18 @@ class RopeFinder(nn.Module):
         self.plane_w = nn.Parameter(plane_w, requires_grad=False)
         self.max_radius = max_radius
         self.min_height = min_height
-        self.grid_res_z = 2. / self.field_shape[0]
-        assert self.field_shape[1] == self.field_shape[2]
-        self.grid_res_xy = 2. / self.field_shape[1]
-        self.radius_z = nn.Parameter(torch.tensor(min_radius * self.grid_res_z))
-        self.radius_xy = nn.Parameter(torch.tensor(min_radius * self.grid_res_xy))
+
+        self.radius = nn.Parameter(torch.tensor(min_radius))
         self.grid_size = grid_size
 
         initial_point = torch.tensor(initial_point, dtype=torch.float32)
-        initial_point[:2] *= self.grid_res_xy
-        initial_point[2] *= self.grid_res_z
-        self.origin = nn.Parameter(initial_point)
+        self.origin = nn.Parameter(initial_point)  # XYZ
 
     def criterion(self, slice_data):
         pass
 
     def num_grid_points(self):
-        return self.grid_size * self.radius_z / self.grid_res_z
+        return torch.round(self.grid_size * self.radius).int()
 
     @staticmethod
     def plane_vw(plane_normal):
@@ -74,8 +70,8 @@ class RopeFinder(nn.Module):
 
     def direction_points(self, grid, direction):
         points = grid[None, ...] * direction.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-        points[:2, ...] *= self.grid_res_xy
-        points[2, ...] *= self.grid_res_z
+        #points[:2, ...] *= self.grid_res_xy
+        #points[2, ...] *= self.grid_res_z
         return points
 
     def get_grid(self):
@@ -83,17 +79,33 @@ class RopeFinder(nn.Module):
 
         num_points = self.num_grid_points()
         grid_xy = torch.arange(-num_points.item(), num_points.item() + 1)
-        grid_z = torch.arange(1.)
+        grid_z = torch.arange(1)
 
-        v, w, zz = torch.meshgrid(grid_xy, grid_xy, grid_z, indexing='ij')
+        v, w, zz = torch.meshgrid(grid_xy, grid_xy, grid_z, indexing='xy')
+
         grid_v = self.direction_points(v, plane_v)
         grid_w = self.direction_points(w, plane_w)
 
-        plane_grid = grid_v + grid_w
-        plane_grid = plane_grid.permute(3, 2, 1, 0)
+        plane_grid = grid_v + grid_w  # 3, H, W, D
+
+        plane_grid = plane_grid.permute(3, 1, 2, 0)  # D, H, W, 3
         plane_grid += self.origin[None, None, None, :]
 
         return plane_grid
+
+    def slice_data(self, grid, data, eps=1e-8):
+        if len(grid.shape) == 4:
+            grid = grid.unsqueeze(0)
+        assert len(grid.shape) == 5
+        if len(data.shape) == 4:
+            data = data.unsqueeze(0)
+        assert len(data.shape) == 5
+        dhw = torch.tensor(data.shape[-3:])
+        whd = torch.flip(dhw, dims=(-1,))
+        scale_factor = (2. / (whd - 1 + eps))
+        grid_ = grid * scale_factor[None, None, None, None, :] - 1.
+        x = F.grid_sample(data, grid_.double())
+        return x
 
 
 def save(filename):
@@ -105,15 +117,12 @@ def save(filename):
 
 
 def test(filename=None):
-    model = RopeFinder()
+    model = RopeFinder((100, 100, 60))
     grid = model.get_grid()
     data = torch.load(filename)
-    data = data.unsqueeze(0)
-    grid = grid.unsqueeze(0)
-    x = F.grid_sample(data, grid.double())
+    print(torch.norm(data, dim=0)[60, 100, 100])
+    x = model.slice_data(grid, data)
     x = torch.norm(x, dim=1)[0, 0]
-    print(x.shape)
-    print(x)
 
 
 if __name__ == '__main__':

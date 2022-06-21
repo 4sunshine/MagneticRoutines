@@ -11,10 +11,10 @@ class RopeFinder(nn.Module):
                  initial_point=(200, 200, 60),
                  initial_normal=(1, 1, 0),
                  min_radius=2.,
-                 max_radius=20.,
+                 max_radius=9.,
                  min_height=1.,
                  field_shape=(75, 400, 400),
-                 grid_size=3,
+                 grid_size=6,
                  ):
         """
         Min radius is in box relative units.
@@ -39,10 +39,14 @@ class RopeFinder(nn.Module):
         self.origin = nn.Parameter(initial_point)  # XYZ
 
     def criterion(self, slice_data):
+        """
+        Implement here following:
+        loss = - Jz_0^2 - Bz_0^2 + (meanBz - Bz_0)^2 + (meanJz - Jz_0)^2 + mean((grad_r Jz)^2) - mean((grad_r Jz|R)^2)
+        """
         pass
 
-    def num_grid_points(self):
-        return torch.round(self.grid_size * self.radius).int()
+    # def num_grid_points(self):
+    #     return torch.round(self.grid_size * self.radius).int()
 
     @staticmethod
     def plane_vw(plane_normal):
@@ -70,18 +74,25 @@ class RopeFinder(nn.Module):
 
     def direction_points(self, grid, direction):
         points = grid[None, ...] * direction.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-        #points[:2, ...] *= self.grid_res_xy
-        #points[2, ...] *= self.grid_res_z
         return points
+
+    def cylindircal_grid(self, v, w):
+        v = v[..., -1].squeeze(-1)
+        w = w[..., -1].squeeze(-1)
+        vw = torch.stack((v, w), dim=-1).double()
+        r = torch.norm(vw, dim=-1)
+        phi = torch.atan2(vw[..., 1], vw[..., 0])
+        return r, phi
 
     def get_grid(self):
         plane_normal, plane_v, plane_w = self.plane_vw(self.plane_normal)
 
-        num_points = self.num_grid_points()
-        grid_xy = torch.arange(-num_points.item(), num_points.item() + 1)
+        grid_xy = torch.arange(-self.grid_size, self.grid_size + 1)
         grid_z = torch.arange(1)
 
         v, w, zz = torch.meshgrid(grid_xy, grid_xy, grid_z, indexing='xy')
+
+        r, phi = self.cylindircal_grid(v, w)  # SHOULD BE INTERNAL PARAMS
 
         grid_v = self.direction_points(v, plane_v)
         grid_w = self.direction_points(w, plane_w)
@@ -89,9 +100,12 @@ class RopeFinder(nn.Module):
         plane_grid = grid_v + grid_w  # 3, H, W, D
 
         plane_grid = plane_grid.permute(3, 1, 2, 0)  # D, H, W, 3
+
         plane_grid += self.origin[None, None, None, :]
 
-        return plane_grid
+        plane_vwn = torch.stack([plane_v, plane_w, plane_normal], dim=0)
+
+        return plane_grid, (r, phi), plane_vwn
 
     def slice_data(self, grid, data, eps=1e-8):
         if len(grid.shape) == 4:
@@ -107,6 +121,23 @@ class RopeFinder(nn.Module):
         x = F.grid_sample(data, grid_.double())
         return x
 
+    def cylindrical_grad(self, field, r_phi):
+        r, phi = r_phi
+        grad_f_yx = torch.gradient(field, spacing=1, dim=(-2, -1), edge_order=2)
+        grad_y, grad_x = grad_f_yx
+        jacob_x = 1. / torch.cos(phi)
+        jacob_x[:, self.grid_size] = 0  # COS_PHI = 0
+        jacob_y = 1. / torch.sin(phi)
+        jacob_y[self.grid_size, :] = 0  # SIN_PHI = 0
+        grad_r = jacob_x[None, None, None, ...] * grad_x + jacob_y[None, None, None, ...] * grad_y
+        print(grad_r.shape)
+        print(grad_r)
+        exit(0)
+        print(jacob_y.shape)
+        print(jacob_y)
+        print(torch.max(torch.abs(jacob_y)))
+        print(self.grid_size)
+
 
 def save(filename):
     box = GXBox(filename)
@@ -116,16 +147,26 @@ def save(filename):
     torch.save(j, 'curl.pt')
 
 
-def test(filename=None):
+def test(file_b=None, file_j=None):
     model = RopeFinder((100, 100, 60))
-    grid = model.get_grid()
-    data = torch.load(filename)
-    print(torch.norm(data, dim=0)[60, 100, 100])
-    x = model.slice_data(grid, data)
-    x = torch.norm(x, dim=1)[0, 0]
+    grid, r_phi, plane_vwn = model.get_grid()
+    print(plane_vwn)
+    b_data = torch.load(file_b)
+    j_data = torch.load(file_j)
+    b = model.slice_data(grid, b_data)
+    j = model.slice_data(grid, j_data)
+    b_c = torch.einsum('bcdhw,nc->bndhw', b, plane_vwn.double())
+    print(b_c.shape)
 
+    b_cyl = b.permute(2, 3, 4, 0, 1) @ plane_vwn.T.double()
+    b_cyl = b_cyl.permute(3, 4, 0, 1, 2)
+    print(b.shape)
+    print(b_cyl.shape)
+    print(torch.sum(b_cyl - b_c))
+    exit(0)
+    model.cylindrical_grad(b, r_phi)
 
 if __name__ == '__main__':
-    test('b_field.pt')
+    test('b_field.pt', 'curl.pt')
     #filename = sys.argv[1]
     #save(filename)

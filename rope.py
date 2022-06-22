@@ -6,6 +6,25 @@ import torch.nn.functional as F
 from magnetic.sav2vtk import GXBox
 
 
+def levi_civita_3d():
+    e = torch.zeros((3, 3, 3), dtype=torch.double)
+    e[0, 1, 2] = e[1, 2, 0] = e[2, 0, 1] = 1
+    e[2, 1, 0] = e[0, 2, 1] = e[1, 0, 2] = -1
+    return e
+
+
+def curl(f, spacing=1, edge_order=2):
+    assert 4 <= len(f.shape) <= 5
+    if len(f.shape) == 4:
+        f = f.unsqueeze(0)
+    grad_f_zyx = torch.gradient(f, spacing=spacing, dim=(-3, -2, -1), edge_order=edge_order)
+    grad_z, grad_y, grad_x = grad_f_zyx
+    grads = torch.stack([grad_x, grad_y, grad_z], dim=1)
+    lc = levi_civita_3d()
+    curl = torch.einsum('ijk,bjkdhw->bidhw', lc, grads)
+    return curl
+
+
 class RopeFinder(nn.Module):
     def __init__(self,
                  initial_point=(200, 200, 60),
@@ -15,12 +34,14 @@ class RopeFinder(nn.Module):
                  min_height=1.,
                  field_shape=(75, 400, 400),
                  grid_size=6,
+                 z_depth=1,
                  ):
         """
         Min radius is in box relative units.
         Min rope height is in radius units.
         All relative units calculated on z-axis scale.
         Grid size in radius units.
+        All diff [dxF] tensor orders: d_i x F_j
         """
         super(RopeFinder, self).__init__()
         self.field_shape = field_shape
@@ -37,11 +58,16 @@ class RopeFinder(nn.Module):
 
         initial_point = torch.tensor(initial_point, dtype=torch.float32)
         self.origin = nn.Parameter(initial_point)  # XYZ
+        self.z_depth = z_depth
+
+        self.r_phi, (self.v, self.w, self.zz) = self.prepare_regular_grid()
 
     def criterion(self, slice_data):
         """
         Implement here following:
-        loss = - Jz_0^2 - Bz_0^2 + (meanBz - Bz_0)^2 + (meanJz - Jz_0)^2 + mean((grad_r Jz)^2) - mean((grad_r Jz|R)^2)
+        loss = - Jz|0^2 - Bz|0^2  ############+ (meanBz - Bz_0)^2 + (meanJz - Jz_0)^2 + mean((grad_r Jz)^2) - mean((grad_r Jz|R)^2)
+        mean (Br^2) -> 0
+        mean (Jr^2) -> 0
         """
         pass
 
@@ -76,6 +102,15 @@ class RopeFinder(nn.Module):
         points = grid[None, ...] * direction.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
         return points
 
+    def prepare_regular_grid(self):
+        grid_xy = torch.arange(-self.grid_size, self.grid_size + 1)
+        grid_z = torch.arange(self.z_depth)
+
+        v, w, zz = torch.meshgrid(grid_xy, grid_xy, grid_z, indexing='xy')
+
+        r, phi = self.cylindircal_grid(v, w)  # SHOULD BE INTERNAL PARAMS
+        return (r, phi), (v, w, zz)
+
     def cylindircal_grid(self, v, w):
         v = v[..., -1].squeeze(-1)
         w = w[..., -1].squeeze(-1)
@@ -87,15 +122,8 @@ class RopeFinder(nn.Module):
     def get_grid(self):
         plane_normal, plane_v, plane_w = self.plane_vw(self.plane_normal)
 
-        grid_xy = torch.arange(-self.grid_size, self.grid_size + 1)
-        grid_z = torch.arange(1)
-
-        v, w, zz = torch.meshgrid(grid_xy, grid_xy, grid_z, indexing='xy')
-
-        r, phi = self.cylindircal_grid(v, w)  # SHOULD BE INTERNAL PARAMS
-
-        grid_v = self.direction_points(v, plane_v)
-        grid_w = self.direction_points(w, plane_w)
+        grid_v = self.direction_points(self.v, plane_v)
+        grid_w = self.direction_points(self.w, plane_w)
 
         plane_grid = grid_v + grid_w  # 3, H, W, D
 
@@ -105,7 +133,7 @@ class RopeFinder(nn.Module):
 
         plane_vwn = torch.stack([plane_v, plane_w, plane_normal], dim=0)
 
-        return plane_grid, (r, phi), plane_vwn
+        return plane_grid, plane_vwn.double()
 
     def slice_data(self, grid, data, eps=1e-8):
         if len(grid.shape) == 4:
@@ -121,22 +149,53 @@ class RopeFinder(nn.Module):
         x = F.grid_sample(data, grid_.double())
         return x
 
-    def cylindrical_grad(self, field, r_phi):
+    def get_polar_matrix(self, r_phi):
         r, phi = r_phi
-        grad_f_yx = torch.gradient(field, spacing=1, dim=(-2, -1), edge_order=2)
-        grad_y, grad_x = grad_f_yx
-        jacob_x = 1. / torch.cos(phi)
-        jacob_x[:, self.grid_size] = 0  # COS_PHI = 0
-        jacob_y = 1. / torch.sin(phi)
-        jacob_y[self.grid_size, :] = 0  # SIN_PHI = 0
-        grad_r = jacob_x[None, None, None, ...] * grad_x + jacob_y[None, None, None, ...] * grad_y
-        print(grad_r.shape)
-        print(grad_r)
-        exit(0)
-        print(jacob_y.shape)
-        print(jacob_y)
-        print(torch.max(torch.abs(jacob_y)))
-        print(self.grid_size)
+        """https://www2.physics.ox.ac.uk/sites/default/files/2011-10-08/coordinates_pdf_51202.pdf"""
+        sin_phi = torch.sin(phi)
+        cos_phi = torch.cos(phi)
+        e_r = torch.stack((cos_phi, sin_phi, torch.zeros_like(cos_phi)), dim=-1)  #.unsqueeze(0)  # HWC:2
+        e_phi = torch.stack((-sin_phi, cos_phi, torch.zeros_like(cos_phi)), dim=-1)  #.unsqueeze(0)
+        e_n = torch.zeros_like(e_phi)
+        e_n[:, :, -1] = 1
+        polar_matrix = torch.stack((e_r, e_phi, e_n), dim=0)
+        return polar_matrix
+
+    def cartesian_to_polar(self, field, polar_matrix):
+        field_axial = torch.einsum('bcdhw,nhwc->bndhw', field, polar_matrix)  # B3DHW, 3: R, PHI, N
+        return field_axial
+
+    def grad_to_polar(self, f, polar_matrix):
+        assert 2 <= len(f) <= 3
+        grad_y, grad_x = f[:2]
+        if len(f) == 2:
+            grad_z = torch.zeros_like(f[-1])
+        else:
+            grad_z = f[2]
+        grads = torch.stack((grad_x, grad_y, grad_z), dim=1)
+        grads_axial = torch.einsum('bcidhw,nhwc->bnidhw', grads, polar_matrix)  # B3DHW, 3: R, PHI, N
+        """
+        Grads axial shape:
+        B x 3[dR, dTHETA, dZ] x 3[R, THETA, Z] x D x H x W  
+        """
+        return grads_axial
+
+    def project_on_plane(self, f, plane_vwn):
+        return torch.einsum('bcdhw,nc->bndhw', f, plane_vwn)
+
+    def cylindrical_grad(self, field):
+        polar_matrix = self.get_polar_matrix(self.r_phi)
+        f_pol = self.cartesian_to_polar(field, polar_matrix)
+        grad_f_pol_yx = torch.gradient(f_pol, spacing=1, dim=(-2, -1), edge_order=2)
+        grads_axial = self.grad_to_polar(grad_f_pol_yx, polar_matrix)
+        return grads_axial
+
+    def forward(self, f):
+        grid, plane_vwn = self.get_grid()
+        f_p = self.slice_data(grid, f)
+        f_p = self.project_on_plane(f_p, plane_vwn)
+        grad_f_p = self.cylindrical_grad(f_p)
+        return f_p, grad_f_p
 
 
 def save(filename):
@@ -147,26 +206,14 @@ def save(filename):
     torch.save(j, 'curl.pt')
 
 
-def test(file_b=None, file_j=None):
+def test(file_b=None):
     model = RopeFinder((100, 100, 60))
-    grid, r_phi, plane_vwn = model.get_grid()
-    print(plane_vwn)
     b_data = torch.load(file_b)
-    j_data = torch.load(file_j)
-    b = model.slice_data(grid, b_data)
-    j = model.slice_data(grid, j_data)
-    b_c = torch.einsum('bcdhw,nc->bndhw', b, plane_vwn.double())
-    print(b_c.shape)
+    f_p, grad_f_p = model(b_data)
+    j = curl(b_data)
 
-    b_cyl = b.permute(2, 3, 4, 0, 1) @ plane_vwn.T.double()
-    b_cyl = b_cyl.permute(3, 4, 0, 1, 2)
-    print(b.shape)
-    print(b_cyl.shape)
-    print(torch.sum(b_cyl - b_c))
-    exit(0)
-    model.cylindrical_grad(b, r_phi)
 
 if __name__ == '__main__':
-    test('b_field.pt', 'curl.pt')
+    test('b_field.pt')
     #filename = sys.argv[1]
     #save(filename)

@@ -2,6 +2,8 @@ import sys
 import torch
 from torch import nn
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 from magnetic.sav2vtk import GXBox
 
@@ -30,7 +32,6 @@ class RopeFinder(nn.Module):
                  initial_point=(200, 200, 60),
                  initial_normal=(1, 1, 0),
                  min_radius=2.,
-                 max_radius=9.,
                  min_height=1.,
                  field_shape=(75, 400, 400),
                  grid_size=6,
@@ -50,10 +51,10 @@ class RopeFinder(nn.Module):
         self.plane_normal = nn.Parameter(plane_normal)
         self.plane_v = nn.Parameter(plane_v, requires_grad=False)
         self.plane_w = nn.Parameter(plane_w, requires_grad=False)
-        self.max_radius = max_radius
         self.min_height = min_height
 
-        self.radius = nn.Parameter(torch.tensor(min_radius))
+        self.min_radius = min_radius
+        self.radius = nn.Parameter(torch.tensor(self.min_radius))
         self.grid_size = grid_size
 
         initial_point = torch.tensor(initial_point, dtype=torch.float32)
@@ -61,15 +62,43 @@ class RopeFinder(nn.Module):
         self.z_depth = z_depth
 
         self.r_phi, (self.v, self.w, self.zz) = self.prepare_regular_grid()
+        self.eps = 1e-12
 
-    def criterion(self, slice_data):
+    def get_radial_mask(self):
+        radius = self.radius.clamp(self.min_radius, self.grid_size)
+        mask = self.r_phi[0] <= radius
+        return mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)
+
+    def criterion(self, b, j):
         """
         Implement here following:
         loss = - Jz|0^2 - Bz|0^2  ############+ (meanBz - Bz_0)^2 + (meanJz - Jz_0)^2 + mean((grad_r Jz)^2) - mean((grad_r Jz|R)^2)
         mean (Br^2) -> 0
         mean (Jr^2) -> 0
+        radius -> max
         """
-        pass
+        radial_mask = self.get_radial_mask()
+        b_r, b_t, b_z = torch.chunk(b, 3, dim=1)
+        j_r, j_t, j_z = torch.chunk(j, 3, dim=1)
+
+        j_z0 = j_z[..., self.grid_size, self.grid_size]
+        loss_j0 = - torch.mean(j_z0 ** 2)
+        sum_j = torch.mean((j_z ** 2)[radial_mask]) + self.eps
+        loss_j0 /= sum_j
+
+        b_z0 = b_z[..., self.grid_size, self.grid_size]
+        loss_b0z = - torch.mean(b_z0)
+        sum_bz = torch.mean(b_z.abs()[radial_mask]) + self.eps
+        loss_b0z /= sum_bz
+
+        loss_br = torch.mean((b_r ** 2)[radial_mask]) / (b_z0 ** 2 + self.eps)
+        loss_jr = torch.mean((j_r ** 2)[radial_mask]) / (j_z0 ** 2 + self.eps)
+
+        radial_loss = -torch.mean(radial_mask.double())
+
+        loss = 2 * (loss_b0z + loss_j0) + loss_br + loss_jr + radial_loss + self.plane_normal[2].abs()
+
+        return loss
 
     # def num_grid_points(self):
     #     return torch.round(self.grid_size * self.radius).int()
@@ -146,7 +175,8 @@ class RopeFinder(nn.Module):
         whd = torch.flip(dhw, dims=(-1,))
         scale_factor = (2. / (whd - 1 + eps))
         grid_ = grid * scale_factor[None, None, None, None, :] - 1.
-        x = F.grid_sample(data, grid_.double())
+        b = data.shape[0]
+        x = F.grid_sample(data, grid_.double().repeat_interleave(b, dim=0))
         return x
 
     def get_polar_matrix(self, r_phi):
@@ -190,12 +220,22 @@ class RopeFinder(nn.Module):
         grads_axial = self.grad_to_polar(grad_f_pol_yx, polar_matrix)
         return grads_axial
 
-    def forward(self, f):
+    def forward(self, f, j=None):
         grid, plane_vwn = self.get_grid()
+        if j is not None:
+            f = torch.cat([f, j], dim=0)
         f_p = self.slice_data(grid, f)
         f_p = self.project_on_plane(f_p, plane_vwn)
         grad_f_p = self.cylindrical_grad(f_p)
-        return f_p, grad_f_p
+        if j is not None:
+            bs = f_p.size(0)
+            j = f_p[bs // 2:]
+            f_p = f_p[: bs // 2]
+            grad_j_p = grad_f_p[bs // 2:]
+            grad_f_p = grad_f_p[: bs // 2]
+        else:
+            grad_j_p = None
+        return f_p, grad_f_p, j, grad_j_p
 
 
 def save(filename):
@@ -206,14 +246,67 @@ def save(filename):
     torch.save(j, 'curl.pt')
 
 
+def plot_field(f, labels=(r'$B_r, G$', r'$B_\tau, G$', r'$B_z, G$'), z_slice=0, nrows=1):
+    f = torch.flip(f, dims=(-2,))
+    f = f.detach().cpu().numpy()
+    batch, dim, depth, height, width = f.shape
+    data = f[0]
+    fig, axs = plt.subplots(nrows=nrows, ncols=dim, sharex=True,
+                            gridspec_kw=dict(height_ratios=[1], width_ratios=[1] * dim))
+
+    fig.set_size_inches(16, 9)
+
+    for j in range(dim):
+        sns.heatmap(data[j, z_slice], linewidth=0.1, ax=axs[j],
+                    cbar_kws=dict(use_gridspec=False, location="right", pad=0.01, shrink=min(1., nrows / 2),
+                                  label=labels[j]))
+        axs[j].set_aspect('equal', 'box')
+        axs[j].set_yticklabels(list(range(height // 2, - (height // 2 + 1), -1)))
+        axs[j].set_xticklabels(list(range(- (width // 2), width // 2 + 1)))
+
+    plt.savefig('test_fig.png', bbox_inches='tight')
+
+
 def test(file_b=None):
-    model = RopeFinder((100, 100, 60))
-    b_data = torch.load(file_b)
-    f_p, grad_f_p = model(b_data)
+    model = RopeFinder((200, 200, 20))
+    b_data = torch.load(file_b).unsqueeze(0)
     j = curl(b_data)
+    f_p, grad_f_p, j_p, grad_j_p = model(b_data, j)
+    loss = model.criterion(f_p, j_p)
+    print(loss)
+    # plot_field(j_p)
+
+
+def main(file_b,
+         initial_point=(200, 200, 20),
+         lr=0.2,
+         max_iterations=2000,
+         log_every=50):
+    model = RopeFinder(initial_point)
+
+    b_data = torch.load(file_b).unsqueeze(0)
+    j = curl(b_data)
+
+    optimizer = torch.optim.SGD(params=model.parameters(), lr=lr, momentum=0.9)
+
+    running_loss = 0.0
+
+    for i in range(max_iterations):
+        optimizer.zero_grad()
+        f_p, grad_f_p, j_p, grad_j_p = model(b_data, j)
+        loss = model.criterion(f_p, j_p)
+        loss.backward()
+        optimizer.step()
+        running_loss += loss.item()
+        if i % log_every == 0:
+            print(f'Iter: {i}. Loss: {running_loss / log_every:.3f}')
+            print(f'Initial point: {model.origin.detach().cpu().numpy()}')
+            print(f'Plane normal: {model.plane_normal.detach().cpu().numpy()}')
+            print(f'Radius: {model.radius.detach().cpu().numpy()}')
+            running_loss = 0.
 
 
 if __name__ == '__main__':
-    test('b_field.pt')
+    main('b_field.pt')
     #filename = sys.argv[1]
     #save(filename)

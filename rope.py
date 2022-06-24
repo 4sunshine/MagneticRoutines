@@ -96,7 +96,7 @@ class RopeFinder(nn.Module):
 
         radial_loss = -torch.mean(radial_mask.double())
 
-        loss = 2 * (loss_b0z + loss_j0) + loss_br + loss_jr + radial_loss + self.plane_normal[2].abs()
+        loss = 2 * (loss_b0z + loss_j0) + loss_br + loss_jr + radial_loss
 
         return loss
 
@@ -222,8 +222,10 @@ class RopeFinder(nn.Module):
 
     def forward(self, f, j=None):
         grid, plane_vwn = self.get_grid()
+
         if j is not None:
             f = torch.cat([f, j], dim=0)
+
         f_p = self.slice_data(grid, f)
         f_p = self.project_on_plane(f_p, plane_vwn)
         grad_f_p = self.cylindrical_grad(f_p)
@@ -244,6 +246,30 @@ def save(filename):
     j = box.field_to_torch(*box.curl)
     torch.save(b, 'b_field.pt')
     torch.save(j, 'curl.pt')
+
+
+def save_points(data, plane_n, grid_size):
+    import numpy as np
+    from pyevtk.hl import pointsToVTK
+    data = data[0]
+    points_y_plus = data[grid_size:, grid_size, :].T.detach().numpy()
+    points_x_plus = data[grid_size, grid_size:, :].T.detach().numpy()
+    points_d = torch.diagonal(data)[:, grid_size:].detach().numpy()
+    xd, yd, zd = points_d
+    xt, yt, zt = points_y_plus
+    xp, yp, zp = points_x_plus
+    origin = points_x_plus[:, 0]
+    points_n = torch.arange(1, 10)[:, None]
+    plane_n_ = plane_n[None, :] * points_n
+    plane_n_ = plane_n_.T
+    plane_n_ = plane_n_.detach().numpy()
+    plane_n_ = plane_n_ + origin[:, None]
+    px, py, pz = plane_n_
+    x_points = np.concatenate([xd, xt, xp, px]).flatten()
+    y_points = np.concatenate([yd, yt, yp, py]).flatten()
+    z_points = np.concatenate([zd, zt, zp, pz]).flatten()
+    test_data = np.ones(np.shape(x_points)[0])
+    pointsToVTK('plane_vtk', x_points, y_points, z_points, {'source': test_data})
 
 
 def plot_field(f, labels=(r'$B_r, G$', r'$B_\tau, G$', r'$B_z, G$'), z_slice=0, nrows=1):

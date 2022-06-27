@@ -5,6 +5,8 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+from tensorboardX import SummaryWriter
+
 from magnetic.sav2vtk import GXBox
 
 
@@ -46,6 +48,8 @@ class RopeFinder(nn.Module):
         """
         super(RopeFinder, self).__init__()
         self.max_z, self.max_y, self.max_x = field_shape
+        self.whd = torch.tensor([self.max_x, self.max_y, self.max_z], dtype=torch.double)
+        self.eps = 1e-8
 
         initial_normal = torch.tensor(initial_normal, dtype=torch.double)
         initial_normal /= torch.norm(initial_normal)
@@ -55,7 +59,10 @@ class RopeFinder(nn.Module):
 
         self.plane_v = nn.Parameter(plane_v, requires_grad=False)
         self.plane_w = nn.Parameter(plane_w, requires_grad=False)
-        self.margin = min_height
+
+        self.margin_x = self.normalize_point(min_height, self.max_x)
+        self.margin_y = self.normalize_point(min_height, self.max_y)
+        self.margin_z = self.normalize_point(min_height, self.max_z)
 
         self.min_radius = min_radius
         self.grid_size = grid_size
@@ -63,18 +70,32 @@ class RopeFinder(nn.Module):
 
         initial_point = torch.tensor(initial_point, dtype=torch.double)
 
-        self.o_x = nn.Parameter(initial_point[0])
-        self.o_y = nn.Parameter(initial_point[1])
-        self.o_z = nn.Parameter(initial_point[2])
+        self.o_x = nn.Parameter(self.normalize_point(initial_point[0], self.max_x).double())
+        self.o_y = nn.Parameter(self.normalize_point(initial_point[1], self.max_y).double())
+        self.o_z = nn.Parameter(self.normalize_point(initial_point[2], self.max_z).double())
 
         self.z_depth = z_depth
 
         self.r_phi, (self.v, self.w, self.zz) = self.prepare_regular_grid()
-        self.eps = 1e-12
+
+    def normalize_point(self, x, max_size):
+        factor = torch.tensor(2.) / torch.tensor(max_size - 1.).clamp(self.eps)
+        return factor * x - 1
+
+    def denormalize_point(self, x, max_size):
+        factor = torch.tensor(2.) / torch.tensor(max_size - 1.).clamp(self.eps)
+        return 1. / factor * (x + 1.)
 
     def get_radial_mask(self):
         mask = self.r_phi[0] <= self.radius
         return mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)
+
+    @torch.no_grad()
+    def origin(self):
+        ox = self.denormalize_point(self.o_x.detach().cpu().numpy(), self.max_x)
+        oy = self.denormalize_point(self.o_y.detach().cpu().numpy(), self.max_y)
+        oz = self.denormalize_point(self.o_z.detach().cpu().numpy(), self.max_z)
+        return ox.item(), oy.item(), oz.item()
 
     def criterion(self, b, j):
         """
@@ -163,15 +184,15 @@ class RopeFinder(nn.Module):
 
         plane_grid = plane_grid.permute(3, 1, 2, 0)  # D, H, W, 3
 
-        plane_grid[..., 0] += self.o_x
-        plane_grid[..., 1] += self.o_y
-        plane_grid[..., 2] += self.o_z
+        plane_grid[..., 0] += self.denormalize_point(self.o_x, self.max_x)
+        plane_grid[..., 1] += self.denormalize_point(self.o_y, self.max_y)
+        plane_grid[..., 2] += self.denormalize_point(self.o_z, self.max_z)
 
         plane_vwn = torch.stack([plane_v, plane_w, self.plane_normal], dim=0)
 
         return plane_grid, plane_vwn.double()
 
-    def slice_data(self, grid, data, eps=1e-8):
+    def slice_data(self, grid, data):
         if len(grid.shape) == 4:
             grid = grid.unsqueeze(0)
         assert len(grid.shape) == 5
@@ -180,8 +201,9 @@ class RopeFinder(nn.Module):
         assert len(data.shape) == 5
         dhw = torch.tensor(data.shape[-3:])
         whd = torch.flip(dhw, dims=(-1,))
-        scale_factor = (2. / (whd - 1 + eps))
+        scale_factor = (2. / (whd - 1 + self.eps))
         grid_ = grid * scale_factor[None, None, None, None, :] - 1.
+
         b = data.shape[0]
         x = F.grid_sample(data, grid_.double().repeat_interleave(b, dim=0))
         return x
@@ -231,9 +253,9 @@ class RopeFinder(nn.Module):
         # DO ALL NORMALIZATIONS BEFORE FORWARD PASS
         with torch.no_grad():
             self.radius.clamp_(self.min_radius, self.grid_size)
-            self.o_x.clamp_(self.margin, self.max_x - self.margin)
-            self.o_y.clamp_(self.margin, self.max_y - self.margin)
-            self.o_z.clamp_(self.margin, self.max_z - self.margin)
+            self.o_x.clamp_(self.margin_x, -self.margin_x)
+            self.o_y.clamp_(self.margin_y, -self.margin_y)
+            self.o_z.clamp_(self.margin_z, -self.margin_z)
             self.plane_normal.clamp_(-1, 1)
             self.plane_normal.div_(self.plane_normal.norm())
 
@@ -253,6 +275,7 @@ class RopeFinder(nn.Module):
             grad_f_p = grad_f_p[: bs // 2]
         else:
             grad_j_p = None
+
         return f_p, grad_f_p, j, grad_j_p
 
 
@@ -288,7 +311,7 @@ def save_points(data, plane_n, grid_size):
     pointsToVTK('plane_vtk', x_points, y_points, z_points, {'source': test_data})
 
 
-def plot_field(f, labels=(r'$B_r, G$', r'$B_\tau, G$', r'$B_z, G$'), z_slice=0, nrows=1):
+def plot_field(f, labels=(r'$B_r, G$', r'$B_\tau, G$', r'$B_z, G$'), z_slice=0, nrows=1, tb_log=True):
     f = torch.flip(f, dims=(-2,))
     f = f.detach().cpu().numpy()
     batch, dim, depth, height, width = f.shape
@@ -306,7 +329,10 @@ def plot_field(f, labels=(r'$B_r, G$', r'$B_\tau, G$', r'$B_z, G$'), z_slice=0, 
         axs[j].set_yticklabels(list(range(height // 2, - (height // 2 + 1), -1)))
         axs[j].set_xticklabels(list(range(- (width // 2), width // 2 + 1)))
 
-    plt.savefig('test_fig.png', bbox_inches='tight')
+    if tb_log:
+        return fig
+    else:
+        plt.savefig('test_fig.png', bbox_inches='tight')
 
 
 def test(file_b=None):
@@ -321,19 +347,28 @@ def test(file_b=None):
 
 def main(file_b,
          initial_point=(200, 250, 20),
-         lr=0.002,
+         lr=1.e-6,
          max_iterations=2000,
-         log_every=50):
-    model = RopeFinder(initial_point)
-
+         log_every=2,
+         min_height=5,
+         grid_size=9,
+         radius=6):
     b_data = torch.load(file_b).unsqueeze(0)
     j = curl(b_data)
+
+    writer = SummaryWriter('runs/test')
+
+    model = RopeFinder(initial_point,
+                       min_height=min_height,
+                       grid_size=grid_size,
+                       min_radius=radius)
 
     optimizer = torch.optim.SGD(params=model.parameters(), lr=lr, momentum=0.9)
 
     running_loss = 0.0
 
     for i in range(max_iterations):
+        model.train()
         optimizer.zero_grad()
         f_p, grad_f_p, j_p, grad_j_p = model(b_data, j)
         loss = model.criterion(f_p, j_p)
@@ -341,12 +376,14 @@ def main(file_b,
         optimizer.step()
         running_loss += loss.item()
         if i % log_every == 0:
+            model.eval()
             print(f'Iter: {i}. Loss: {running_loss / log_every:.3f}')
-            print(f'Initial point: {model.o_x.detach().cpu().numpy()},'
-                  f'{model.o_y.detach().cpu().numpy()},'
-                  f'{model.o_z.detach().cpu().numpy()}')
+            print(f'Initial point: {model.origin()}')
             print(f'Plane normal: {model.plane_normal.detach().cpu().numpy()}')
             print(f'Radius: {model.radius.detach().cpu().numpy()}')
+            fig = plot_field(f_p)
+            writer.add_figure('Field', fig, global_step=i)
+            writer.add_scalar('Loss', running_loss / log_every, global_step=i)
             running_loss = 0.
 
 

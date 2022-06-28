@@ -52,7 +52,7 @@ class RopeFinder(nn.Module):
         self.eps = 1e-8
 
         initial_normal = torch.tensor(initial_normal, dtype=torch.double)
-        initial_normal /= torch.norm(initial_normal)
+        initial_normal /= torch.linalg.norm(initial_normal)
 
         plane_v, plane_w = self.plane_vw(initial_normal)
         self.plane_normal = nn.Parameter(initial_normal)
@@ -64,9 +64,9 @@ class RopeFinder(nn.Module):
         self.margin_y = self.normalize_point(min_height, self.max_y)
         self.margin_z = self.normalize_point(min_height, self.max_z)
 
-        self.min_radius = min_radius
+        self.min_radius = min_radius / grid_size
         self.grid_size = grid_size
-        self.radius = nn.Parameter(torch.tensor(0.5 * (self.min_radius + self.grid_size)))
+        self.radius = nn.Parameter(torch.tensor(0.5 * (self.min_radius + 1.)))
 
         initial_point = torch.tensor(initial_point, dtype=torch.double)
 
@@ -77,6 +77,7 @@ class RopeFinder(nn.Module):
         self.z_depth = z_depth
 
         self.r_phi, (self.v, self.w, self.zz) = self.prepare_regular_grid()
+        self.k_e = 50  # FROM DB PAPER https://arxiv.org/pdf/1911.08947.pdf
 
     def normalize_point(self, x, max_size):
         factor = torch.tensor(2.) / torch.tensor(max_size - 1.).clamp(self.eps)
@@ -86,10 +87,16 @@ class RopeFinder(nn.Module):
         factor = torch.tensor(2.) / torch.tensor(max_size - 1.).clamp(self.eps)
         return 1. / factor * (x + 1.)
 
+    # def get_radial_mask(self):
+    #     mask = self.r_phi[0] <= self.radius
+    #     return mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)
+
     def get_radial_mask(self):
-        mask = self.r_phi[0] <= self.radius
+        exp_arg = self.k_e * (self.radius * self.grid_size - self.r_phi[0])
+        mask = 1. / (1 + torch.exp(-exp_arg))
         return mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)
 
+    @property
     @torch.no_grad()
     def origin(self):
         ox = self.denormalize_point(self.o_x.detach().cpu().numpy(), self.max_x)
@@ -97,7 +104,13 @@ class RopeFinder(nn.Module):
         oz = self.denormalize_point(self.o_z.detach().cpu().numpy(), self.max_z)
         return ox.item(), oy.item(), oz.item()
 
-    def criterion(self, b, j):
+    @property
+    @torch.no_grad()
+    def r(self):
+        radius = self.radius.detach().cpu().numpy() * self.grid_size
+        return radius.item()
+
+    def criterion_non_db(self, b, j):
         """
         Implement here following:
         loss = - Jz|0^2 - Bz|0^2  ############+ (meanBz - Bz_0)^2 + (meanJz - Jz_0)^2 + mean((grad_r Jz)^2) - mean((grad_r Jz|R)^2)
@@ -106,6 +119,7 @@ class RopeFinder(nn.Module):
         radius -> max
         """
         radial_mask = self.get_radial_mask()
+
         b_r, b_t, b_z = torch.chunk(b, 3, dim=1)
         j_r, j_t, j_z = torch.chunk(j, 3, dim=1)
 
@@ -125,6 +139,48 @@ class RopeFinder(nn.Module):
         radial_loss = -torch.mean(radial_mask.double())
 
         loss = 2 * (loss_b0z + loss_j0) + loss_br + loss_jr + radial_loss
+
+        return loss
+
+    def criterion(self, b, j, b_p):
+        """
+        Implement here following:
+        loss = - Jz|0^2 - Bz|0^2  ############+ (meanBz - Bz_0)^2 + (meanJz - Jz_0)^2 + mean((grad_r Jz)^2) - mean((grad_r Jz|R)^2)
+        mean (Br^2) -> 0
+        mean (Jr^2) -> 0
+        radius -> max
+        """
+        radial_mask = self.get_radial_mask() #.detach()
+
+        mask_sum = torch.sum(radial_mask).detach()
+
+        b_r, b_t, b_z = torch.chunk(b, 3, dim=1)
+        j_r, j_t, j_z = torch.chunk(j, 3, dim=1)
+
+        j_z0 = j_z[..., self.grid_size, self.grid_size]
+        loss_j0 = - torch.mean(j_z0 ** 2)
+        mean_j = torch.sum((j_z ** 2) * radial_mask) / mask_sum + self.eps
+        loss_j0 /= mean_j
+
+        b_z0 = b_z[..., self.grid_size, self.grid_size]
+        loss_b0z = - torch.mean(b_z0)
+        mean_b = torch.sum(torch.abs(b_z) * radial_mask) / mask_sum + self.eps
+        loss_b0z /= mean_b
+
+        loss_br = torch.sum((b_r ** 2) * radial_mask) / (b_z0 ** 2 + self.eps) / mask_sum
+        loss_jr = torch.sum((j_r ** 2) * radial_mask) / (j_z0 ** 2 + self.eps) / mask_sum
+
+        radial_loss = - self.radius
+
+        b_central = b_p[..., self.grid_size, self.grid_size]
+        b_central = b_central.permute(0, 2, 1)
+        b_central = b_central / torch.linalg.norm(b_central, dim=-1, keepdim=True)
+
+        plane_normal_norm = torch.linalg.norm(self.plane_normal)
+        direction_loss = b_central @ self.plane_normal.unsqueeze(-1) / plane_normal_norm
+        direction_loss = -torch.mean(direction_loss)
+
+        loss = 2 * (loss_b0z + loss_j0) + loss_br + loss_jr + radial_loss + 2 * direction_loss
 
         return loss
 
@@ -170,7 +226,7 @@ class RopeFinder(nn.Module):
         v = v[..., -1].squeeze(-1)
         w = w[..., -1].squeeze(-1)
         vw = torch.stack((v, w), dim=-1).double()
-        r = torch.norm(vw, dim=-1)
+        r = torch.linalg.norm(vw, dim=-1)
         phi = torch.atan2(vw[..., 1], vw[..., 0])
         return r, phi
 
@@ -247,12 +303,12 @@ class RopeFinder(nn.Module):
         f_pol = self.cartesian_to_polar(field, polar_matrix)
         grad_f_pol_yx = torch.gradient(f_pol, spacing=1, dim=(-2, -1), edge_order=2)
         grads_axial = self.grad_to_polar(grad_f_pol_yx, polar_matrix)
-        return grads_axial
+        return f_pol, grads_axial
 
     def forward(self, f, j=None):
         # DO ALL NORMALIZATIONS BEFORE FORWARD PASS
         with torch.no_grad():
-            self.radius.clamp_(self.min_radius, self.grid_size)
+            self.radius.clamp_(self.min_radius, 1.)
             self.o_x.clamp_(self.margin_x, -self.margin_x)
             self.o_y.clamp_(self.margin_y, -self.margin_y)
             self.o_z.clamp_(self.margin_z, -self.margin_z)
@@ -266,17 +322,22 @@ class RopeFinder(nn.Module):
 
         f_p = self.slice_data(grid, f)
         f_p = self.project_on_plane(f_p, plane_vwn)
-        grad_f_p = self.cylindrical_grad(f_p)
+        f_pol, grad_f_pol = self.cylindrical_grad(f_p)
         if j is not None:
             bs = f_p.size(0)
-            j = f_p[bs // 2:]
+            j_pol = f_pol[bs // 2:]
+            f_pol = f_pol[: bs // 2]
+            j_p = f_p[bs // 2:]
             f_p = f_p[: bs // 2]
-            grad_j_p = grad_f_p[bs // 2:]
-            grad_f_p = grad_f_p[: bs // 2]
-        else:
-            grad_j_p = None
 
-        return f_p, grad_f_p, j, grad_j_p
+            grad_j_pol = grad_f_pol[bs // 2:]
+            grad_f_pol = grad_f_pol[: bs // 2]
+        else:
+            grad_j_pol = None
+            j_pol = None
+            j_p = None
+
+        return f_pol, grad_f_pol, j_pol, grad_j_pol, f_p, j_p
 
 
 def save(filename):
@@ -347,7 +408,8 @@ def test(file_b=None):
 
 def main(file_b,
          initial_point=(200, 250, 20),
-         lr=1.e-6,
+         initial_normal=(-1., -1., 0),
+         lr=2.e-6,
          max_iterations=2000,
          log_every=2,
          min_height=5,
@@ -361,7 +423,8 @@ def main(file_b,
     model = RopeFinder(initial_point,
                        min_height=min_height,
                        grid_size=grid_size,
-                       min_radius=radius)
+                       min_radius=radius,
+                       initial_normal=initial_normal)
 
     optimizer = torch.optim.SGD(params=model.parameters(), lr=lr, momentum=0.9)
 
@@ -370,17 +433,17 @@ def main(file_b,
     for i in range(max_iterations):
         model.train()
         optimizer.zero_grad()
-        f_p, grad_f_p, j_p, grad_j_p = model(b_data, j)
-        loss = model.criterion(f_p, j_p)
+        f_p, grad_f_p, j_p, grad_j_p, f_pl, j_pl = model(b_data, j)
+        loss = model.criterion(f_p, j_p, f_pl)
         loss.backward()
         optimizer.step()
         running_loss += loss.item()
         if i % log_every == 0:
             model.eval()
             print(f'Iter: {i}. Loss: {running_loss / log_every:.3f}')
-            print(f'Initial point: {model.origin()}')
+            print(f'Initial point: {model.origin}')
             print(f'Plane normal: {model.plane_normal.detach().cpu().numpy()}')
-            print(f'Radius: {model.radius.detach().cpu().numpy()}')
+            print(f'Radius: {model.r}')
             fig = plot_field(f_p)
             writer.add_figure('Field', fig, global_step=i)
             writer.add_scalar('Loss', running_loss / log_every, global_step=i)

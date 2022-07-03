@@ -372,7 +372,16 @@ def save_points(data, plane_n, grid_size):
     pointsToVTK('plane_vtk', x_points, y_points, z_points, {'source': test_data})
 
 
-def plot_field(f, labels=(r'$B_r, G$', r'$B_\tau, G$', r'$B_z, G$'), z_slice=0, nrows=1, tb_log=True):
+def plot_field(f, name='B', units='G', is_polar=False, z_slice=0, nrows=1, tb_log=True):
+    def prepare_labels(field_name, field_units, polar=False):
+        if polar:
+            lower_names = ('r', r'\tau', 'z')
+        else:
+            lower_names = ('x', 'y', 'z')
+        all_labels = tuple([rf'${field_name}_{ln}, {field_units}$' for ln in lower_names])
+        return all_labels
+
+    labels = prepare_labels(field_name=name, field_units=units, polar=is_polar)
     f = torch.flip(f, dims=(-2,))
     f = f.detach().cpu().numpy()
     batch, dim, depth, height, width = f.shape
@@ -383,7 +392,7 @@ def plot_field(f, labels=(r'$B_r, G$', r'$B_\tau, G$', r'$B_z, G$'), z_slice=0, 
     fig.set_size_inches(16, 9)
 
     for j in range(dim):
-        sns.heatmap(data[j, z_slice], linewidth=0.1, ax=axs[j],
+        sns.heatmap(data[j, z_slice], linewidth=0.1, ax=axs[j], cmap='vlag', center=0,
                     cbar_kws=dict(use_gridspec=False, location="right", pad=0.01, shrink=min(1., nrows / 2),
                                   label=labels[j]))
         axs[j].set_aspect('equal', 'box')
@@ -444,8 +453,14 @@ def main(file_b,
             print(f'Initial point: {model.origin}')
             print(f'Plane normal: {model.plane_normal.detach().cpu().numpy()}')
             print(f'Radius: {model.r}')
-            fig = plot_field(f_p)
-            writer.add_figure('Field', fig, global_step=i)
+            fig_b = plot_field(f_p, 'B', 'G', True)
+            fig_j = plot_field(j_p, 'j', 'GG', True)
+            fig_b_vw = plot_field(f_pl, 'B', 'G', is_polar=False)
+            fig_j_vw = plot_field(j_pl, 'j', 'GG', is_polar=False)
+            writer.add_figure('B field', fig_b, global_step=i)
+            writer.add_figure('J field', fig_j, global_step=i)
+            writer.add_figure('B planar', fig_b_vw, global_step=i)
+            writer.add_figure('J planar', fig_j_vw, global_step=i)
             writer.add_scalar('Loss', running_loss / log_every, global_step=i)
             running_loss = 0.
 

@@ -4,6 +4,8 @@ from torch import nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pandas as pd
+import numpy as np
 
 from tensorboardX import SummaryWriter
 
@@ -385,6 +387,8 @@ def plot_field(f, name='B', units='G', is_polar=False, z_slice=0, nrows=1, tb_lo
     f = torch.flip(f, dims=(-2,))
     f = f.detach().cpu().numpy()
     batch, dim, depth, height, width = f.shape
+    x_labels = list(range(- (width // 2), width // 2 + 1))
+    y_labels = list(range(height // 2, - (height // 2 + 1), -1))
     data = f[0]
     fig, axs = plt.subplots(nrows=nrows, ncols=dim, sharex=True,
                             gridspec_kw=dict(height_ratios=[1], width_ratios=[1] * dim))
@@ -396,8 +400,43 @@ def plot_field(f, name='B', units='G', is_polar=False, z_slice=0, nrows=1, tb_lo
                     cbar_kws=dict(use_gridspec=False, location="right", pad=0.01, shrink=min(1., nrows / 2),
                                   label=labels[j]))
         axs[j].set_aspect('equal', 'box')
+        axs[j].set_xticks(list(range(len(x_labels))))
         axs[j].set_yticklabels(list(range(height // 2, - (height // 2 + 1), -1)))
-        axs[j].set_xticklabels(list(range(- (width // 2), width // 2 + 1)))
+        axs[j].set_xticklabels(x_labels)
+
+    fig_p, axs_p = plt.subplots(nrows=1, ncols=2, sharey=True,
+                                gridspec_kw=dict(height_ratios=[1], width_ratios=[1] * 2))
+
+    fig_p.set_size_inches(16, 9)
+
+    # for k in range(2):
+    field = data[:, z_slice, ...]
+    field_u = field[:, height // 2 - 1: height // 2 + 2, :]  # TO AVERAGE ALONG DIMENSION
+    field_u = np.transpose(field_u, (2, 1, 0))
+    field_u = np.reshape(field_u, (-1, 3))
+    x_coords = np.array(x_labels).repeat(3, 0)
+
+    df_x = pd.DataFrame(field_u, columns=labels, index=x_coords)
+    sns.lineplot(data=df_x, ax=axs_p[0], markers=True)
+
+    field_v = field[..., width // 2 - 1: width // 2 + 2]
+
+    field_v = np.transpose(field_v, (1, 2, 0))
+    field_v = np.reshape(field_v, (-1, 3))
+    y_coords = np.array(y_labels).repeat(3, 0)
+
+    df_y = pd.DataFrame(field_v, columns=labels, index=y_coords)
+    sns.lineplot(data=df_y, ax=axs_p[1], markers=True)
+
+        # sns.heatmap(data[j, z_slice], linewidth=0.1, ax=axs[j], cmap='vlag', center=0,
+        #             cbar_kws=dict(use_gridspec=False, location="right", pad=0.01, shrink=min(1., nrows / 2),
+        #                           label=labels[j]))
+        # axs[j].set_aspect('equal', 'box')
+        # axs[j].set_xticks(list(range(len(x_labels))))
+        # axs[j].set_yticklabels(list(range(height // 2, - (height // 2 + 1), -1)))
+        # axs[j].set_xticklabels(x_labels)
+    fig_p.savefig('tesst.png')
+    exit(0)
 
     if tb_log:
         return fig
@@ -428,6 +467,12 @@ def main(file_b,
     j = curl(b_data)
 
     writer = SummaryWriter('runs/test')
+
+    initial_normal = (-0.5069487516062562, 0.8619013500193842, 0.)
+    initial_point = (190., 260., 16.)
+    grid_size = 15
+
+    lr = 0
 
     model = RopeFinder(initial_point,
                        min_height=min_height,

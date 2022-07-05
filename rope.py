@@ -374,23 +374,26 @@ def save_points(data, plane_n, grid_size):
     pointsToVTK('plane_vtk', x_points, y_points, z_points, {'source': test_data})
 
 
-def plot_field(f, name='B', units='G', is_polar=False, z_slice=0, nrows=1, tb_log=True):
+def plot_field(f, name='B', units='G', is_polar=False, z_slice=0, nrows=1, tb_log=True, step=0.4):
     def prepare_labels(field_name, field_units, polar=False):
         if polar:
             lower_names = ('r', r'\tau', 'z')
         else:
             lower_names = ('x', 'y', 'z')
         all_labels = tuple([rf'${field_name}_{ln}, {field_units}$' for ln in lower_names])
-        return all_labels
+        labels_without_unit = tuple([rf'${field_name}_{ln}$' for ln in lower_names])
+        return all_labels, labels_without_unit
 
-    labels = prepare_labels(field_name=name, field_units=units, polar=is_polar)
+    labels, labels_without_unit = prepare_labels(field_name=name, field_units=units, polar=is_polar)
     f = torch.flip(f, dims=(-2,))
     f = f.detach().cpu().numpy()
     batch, dim, depth, height, width = f.shape
     x_labels = list(range(- (width // 2), width // 2 + 1))
+    x_labels = [step * x for x in x_labels]
     y_labels = list(range(height // 2, - (height // 2 + 1), -1))
+    y_labels = [step * x for x in y_labels]
     data = f[0]
-    fig, axs = plt.subplots(nrows=nrows, ncols=dim, sharex=True,
+    fig, axs = plt.subplots(nrows=nrows, ncols=dim,
                             gridspec_kw=dict(height_ratios=[1], width_ratios=[1] * dim))
 
     fig.set_size_inches(16, 9)
@@ -398,11 +401,12 @@ def plot_field(f, name='B', units='G', is_polar=False, z_slice=0, nrows=1, tb_lo
     for j in range(dim):
         sns.heatmap(data[j, z_slice], linewidth=0.1, ax=axs[j], cmap='vlag', center=0,
                     cbar_kws=dict(use_gridspec=False, location="right", pad=0.01, shrink=min(1., nrows / 2),
-                                  label=labels[j]))
+                                  label=labels[j])).set(ylabel='y, Mm' if j == 0 else None, xlabel='x, Mm')
         axs[j].set_aspect('equal', 'box')
-        axs[j].set_xticks(list(range(len(x_labels))))
-        axs[j].set_yticklabels(list(range(height // 2, - (height // 2 + 1), -1)))
-        axs[j].set_xticklabels(x_labels)
+        axs[j].set_xticks(list(range(0, len(x_labels), 3)))
+        axs[j].set_yticks(list(range(0, len(y_labels), 3)))
+        axs[j].set_yticklabels([f'{y:.1f}' for y in y_labels[::3]])
+        axs[j].set_xticklabels([f'{x:.1f}' for x in x_labels[::3]])
 
     fig_p, axs_p = plt.subplots(nrows=1, ncols=2, sharey=True,
                                 gridspec_kw=dict(height_ratios=[1], width_ratios=[1] * 2))
@@ -416,8 +420,10 @@ def plot_field(f, name='B', units='G', is_polar=False, z_slice=0, nrows=1, tb_lo
     field_u = np.reshape(field_u, (-1, 3))
     x_coords = np.array(x_labels).repeat(3, 0)
 
-    df_x = pd.DataFrame(field_u, columns=labels, index=x_coords)
-    sns.lineplot(data=df_x, ax=axs_p[0], markers=True)
+    df_x = pd.DataFrame(field_u, columns=labels_without_unit, index=x_coords)
+    sns.lineplot(data=df_x, ax=axs_p[0], markers=True).set(title=f"u-axis slice", xlabel="x, Mm",
+                                                           ylabel=rf"${name}, {units}$")
+    axs_p[0].grid()
 
     field_v = field[..., width // 2 - 1: width // 2 + 2]
 
@@ -425,23 +431,21 @@ def plot_field(f, name='B', units='G', is_polar=False, z_slice=0, nrows=1, tb_lo
     field_v = np.reshape(field_v, (-1, 3))
     y_coords = np.array(y_labels).repeat(3, 0)
 
-    df_y = pd.DataFrame(field_v, columns=labels, index=y_coords)
-    sns.lineplot(data=df_y, ax=axs_p[1], markers=True)
-
-        # sns.heatmap(data[j, z_slice], linewidth=0.1, ax=axs[j], cmap='vlag', center=0,
-        #             cbar_kws=dict(use_gridspec=False, location="right", pad=0.01, shrink=min(1., nrows / 2),
-        #                           label=labels[j]))
-        # axs[j].set_aspect('equal', 'box')
-        # axs[j].set_xticks(list(range(len(x_labels))))
-        # axs[j].set_yticklabels(list(range(height // 2, - (height // 2 + 1), -1)))
-        # axs[j].set_xticklabels(x_labels)
-    fig_p.savefig('tesst.png')
-    exit(0)
+    df_y = pd.DataFrame(field_v, columns=labels_without_unit, index=y_coords)
+    sns.lineplot(data=df_y, ax=axs_p[1], markers=True).set(title=f"v-axis slice", xlabel="y, Mm",
+                                                           ylabel=rf"${name}, {units}$")
+    axs_p[1].grid()
 
     if tb_log:
-        return fig
+        return fig, fig_p
     else:
         plt.savefig('test_fig.png', bbox_inches='tight')
+
+
+def curl_to_j(curl_val, step_mega_meters=0.4):
+    # J = [Field(G)] * c (== 300 000 km/s) / 4Pi / (pixel_size == 400km)
+    j_cgse_coeff = (299.792458 / 4. / np.pi / step_mega_meters)
+    return curl_val * j_cgse_coeff
 
 
 def test(file_b=None):
@@ -462,15 +466,17 @@ def main(file_b,
          log_every=2,
          min_height=5,
          grid_size=9,
-         radius=6):
+         radius=6,
+         step=0.4):
     b_data = torch.load(file_b).unsqueeze(0)
-    j = curl(b_data)
+    bj = curl_to_j(b_data, step_mega_meters=step)
+    j = curl(bj)
 
     writer = SummaryWriter('runs/test')
 
     initial_normal = (-0.5069487516062562, 0.8619013500193842, 0.)
-    initial_point = (190., 260., 16.)
-    grid_size = 15
+    initial_point = (190., 260., 15.)
+    grid_size = 13
 
     lr = 0
 
@@ -498,14 +504,12 @@ def main(file_b,
             print(f'Initial point: {model.origin}')
             print(f'Plane normal: {model.plane_normal.detach().cpu().numpy()}')
             print(f'Radius: {model.r}')
-            fig_b = plot_field(f_p, 'B', 'G', True)
-            fig_j = plot_field(j_p, 'j', 'GG', True)
-            fig_b_vw = plot_field(f_pl, 'B', 'G', is_polar=False)
-            fig_j_vw = plot_field(j_pl, 'j', 'GG', is_polar=False)
+            fig_b, slice_b = plot_field(f_p, 'B', 'G', True, step=step)
+            fig_j, slice_j = plot_field(j_p / 1000., 'j', r'10^{3} \cdot statA \cdot cm^{-2}', True, step=step)
             writer.add_figure('B field', fig_b, global_step=i)
+            writer.add_figure('B slice', slice_b, global_step=i)
             writer.add_figure('J field', fig_j, global_step=i)
-            writer.add_figure('B planar', fig_b_vw, global_step=i)
-            writer.add_figure('J planar', fig_j_vw, global_step=i)
+            writer.add_figure('J slice', slice_j, global_step=i)
             writer.add_scalar('Loss', running_loss / log_every, global_step=i)
             running_loss = 0.
 

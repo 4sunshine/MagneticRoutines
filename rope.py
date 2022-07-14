@@ -31,6 +31,35 @@ def curl(f, spacing=1, edge_order=2):
     return curl
 
 
+# TODO: IMPLEMENT PHI, THETA, PSI AXES ROTATION FORMALISM
+# https://mathworld.wolfram.com/EulerAngles.html
+def euler_matrix(phi, theta, psi):
+    phi = phi.unsqueeze(-1)#.unsqueeze(-1)
+    theta = theta.unsqueeze(-1)#.unsqueeze(-1)
+    psi = psi.unsqueeze(-1)#.unsqueeze(-1)
+    sin_phi = torch.sin(phi)
+    cos_phi = torch.cos(phi)
+    sin_theta = torch.sin(theta)
+    cos_theta = torch.cos(theta)
+    sin_psi = torch.sin(psi)
+    cos_psi = torch.cos(psi)
+    a_11 = cos_psi * cos_phi - cos_theta * sin_phi * sin_psi
+    a_12 = cos_psi * sin_phi + cos_theta * cos_phi * sin_psi
+    a_13 = sin_psi * sin_theta
+    a_21 = - sin_psi * cos_phi - cos_theta * sin_phi * cos_psi
+    a_22 = - sin_psi * sin_phi + cos_theta * cos_phi * cos_psi
+    a_23 = cos_psi * sin_theta
+    a_31 = sin_theta * sin_phi
+    a_32 = - sin_theta * cos_phi
+    a_33 = cos_theta
+    a_1_row = torch.cat([a_11, a_12, a_13], dim=-1)
+    a_2_row = torch.cat([a_21, a_22, a_23], dim=-1)
+    a_3_row = torch.cat([a_31, a_32, a_33], dim=-1)
+    a = torch.cat([a_1_row, a_2_row, a_3_row], dim=-2)
+    return a
+
+
+
 class RopeFinder(nn.Module):
     def __init__(self,
                  initial_point=(200, 200, 60),
@@ -40,6 +69,7 @@ class RopeFinder(nn.Module):
                  field_shape=(75, 400, 400),
                  grid_size=6,
                  z_depth=1,
+                 kernel_size=1,
                  ):
         """
         Min radius is in box relative units.
@@ -56,8 +86,15 @@ class RopeFinder(nn.Module):
         initial_normal = torch.tensor(initial_normal, dtype=torch.double)
         initial_normal /= torch.linalg.norm(initial_normal)
 
-        plane_v, plane_w = self.plane_vw(initial_normal)
-        self.plane_normal = nn.Parameter(initial_normal)
+        self.plane_normal = initial_normal
+        self.phi = nn.Parameter(torch.zeros((1,), dtype=torch.double))
+        self.theta = nn.Parameter(torch.zeros((1,), dtype=torch.double))
+        self.psi = nn.Parameter(torch.zeros((1,), dtype=torch.double))
+        self.pi = torch.acos(torch.zeros(1)).item() * 2
+
+        current_normal = self.current_normal()
+        plane_v, plane_w = self.plane_vw(current_normal)
+        # self.plane_normal = nn.Parameter(initial_normal)
 
         self.plane_v = nn.Parameter(plane_v, requires_grad=False)
         self.plane_w = nn.Parameter(plane_w, requires_grad=False)
@@ -80,6 +117,13 @@ class RopeFinder(nn.Module):
 
         self.r_phi, (self.v, self.w, self.zz) = self.prepare_regular_grid()
         self.k_e = 50  # FROM DB PAPER https://arxiv.org/pdf/1911.08947.pdf
+        self.kernel_size = kernel_size
+
+    def current_normal(self):
+        cur_rotation = euler_matrix(self.pi * self.phi, self.pi * self.theta, self.pi * self.psi)
+        cn = cur_rotation @ self.plane_normal[:, None]
+        cn = cn.T.squeeze(0)
+        return cn
 
     def normalize_point(self, x, max_size):
         factor = torch.tensor(2.) / torch.tensor(max_size - 1.).clamp(self.eps)
@@ -112,6 +156,10 @@ class RopeFinder(nn.Module):
         radius = self.radius.detach().cpu().numpy() * self.grid_size
         return radius.item()
 
+    def central_kernel(self, f):
+        return f[..., self.grid_size - self.kernel_size: self.grid_size + self.kernel_size + 1,
+               self.grid_size - self.kernel_size: self.grid_size + self.kernel_size + 1]
+
     def criterion_non_db(self, b, j):
         """
         Implement here following:
@@ -125,12 +173,12 @@ class RopeFinder(nn.Module):
         b_r, b_t, b_z = torch.chunk(b, 3, dim=1)
         j_r, j_t, j_z = torch.chunk(j, 3, dim=1)
 
-        j_z0 = j_z[..., self.grid_size, self.grid_size]
+        j_z0 = self.central_kernel(j_z)
         loss_j0 = - torch.mean(j_z0 ** 2)
         sum_j = torch.mean((j_z ** 2).detach()[radial_mask]) + self.eps
         loss_j0 /= sum_j
 
-        b_z0 = b_z[..., self.grid_size, self.grid_size]
+        b_z0 = self.central_kernel(b_z)
         loss_b0z = - torch.mean(b_z0)
         sum_bz = torch.mean(b_z.abs().detach()[radial_mask]) + self.eps
         loss_b0z /= sum_bz
@@ -144,7 +192,7 @@ class RopeFinder(nn.Module):
 
         return loss
 
-    def criterion(self, b, j, b_p):
+    def criterion(self, b, j, b_p, grad_b):
         """
         Implement here following:
         loss = - Jz|0^2 - Bz|0^2  ############+ (meanBz - Bz_0)^2 + (meanJz - Jz_0)^2 + mean((grad_r Jz)^2) - mean((grad_r Jz|R)^2)
@@ -159,30 +207,43 @@ class RopeFinder(nn.Module):
         b_r, b_t, b_z = torch.chunk(b, 3, dim=1)
         j_r, j_t, j_z = torch.chunk(j, 3, dim=1)
 
-        j_z0 = j_z[..., self.grid_size, self.grid_size]
+        j_z0 = self.central_kernel(j_z)
         loss_j0 = - torch.mean(j_z0 ** 2)
         mean_j = torch.sum((j_z ** 2) * radial_mask) / mask_sum + self.eps
         loss_j0 /= mean_j
 
-        b_z0 = b_z[..., self.grid_size, self.grid_size]
+        b_z0 = self.central_kernel(b_z)
         loss_b0z = - torch.mean(b_z0)
         mean_b = torch.sum(torch.abs(b_z) * radial_mask) / mask_sum + self.eps
         loss_b0z /= mean_b
 
-        loss_br = torch.sum((b_r ** 2) * radial_mask) / (b_z0 ** 2 + self.eps) / mask_sum
-        loss_jr = torch.sum((j_r ** 2) * radial_mask) / (j_z0 ** 2 + self.eps) / mask_sum
+        loss_br = torch.sum((b_r ** 2) * radial_mask) / (mask_sum + self.eps) / 400. ** 2  #/ (b_z0 ** 2 + self.eps)
+        loss_jr = torch.sum((j_r ** 2) * radial_mask) / (mask_sum + self.eps) / 6000. ** 2  #/ (j_z0 ** 2 + self.eps)
+
+        # print(grad_b.shape)
+        """
+        Grads axial shape:
+        B x 3[dR, dTHETA, dZ] x 3[R, THETA, Z] x D x H x W  
+        """
+        grad_b_r = grad_b[:, :2, 0, ...]
+        loss_grad_b_r = torch.mean(self.central_kernel(grad_b_r)) / 200. ** 2
+        # print(radial_mask.shape)
+        # print(grad_b_r.shape)
+        # print(loss_grad_b_r)
+        # print(loss_br)
+        # exit(0)
 
         radial_loss = - self.radius
 
-        b_central = b_p[..., self.grid_size, self.grid_size]
+        b_central = self.central_kernel(b_p)  # b_p[..., self.grid_size, self.grid_size]
+        b_central = torch.mean(b_central, dim=(-2, -1), keepdim=False)
         b_central = b_central.permute(0, 2, 1)
         b_central = b_central / torch.linalg.norm(b_central, dim=-1, keepdim=True)
 
-        plane_normal_norm = torch.linalg.norm(self.plane_normal)
-        direction_loss = b_central @ self.plane_normal.unsqueeze(-1) / plane_normal_norm
+        direction_loss = b_central @ self.current_normal().unsqueeze(-1)
         direction_loss = -torch.mean(direction_loss)
 
-        loss = 2 * (loss_b0z + loss_j0) + loss_br + loss_jr + radial_loss + 2 * direction_loss
+        loss = 2 * (loss_b0z + loss_j0) + loss_br + loss_jr + radial_loss + 2 * direction_loss + loss_grad_b_r
 
         return loss
 
@@ -233,7 +294,8 @@ class RopeFinder(nn.Module):
         return r, phi
 
     def get_grid(self):
-        plane_v, plane_w = self.plane_vw(self.plane_normal)
+        current_normal = self.current_normal()
+        plane_v, plane_w = self.plane_vw(current_normal)  #self.plane_normal)
 
         grid_v = self.direction_points(self.v, plane_v)
         grid_w = self.direction_points(self.w, plane_w)
@@ -314,8 +376,9 @@ class RopeFinder(nn.Module):
             self.o_x.clamp_(self.margin_x, -self.margin_x)
             self.o_y.clamp_(self.margin_y, -self.margin_y)
             self.o_z.clamp_(self.margin_z, -self.margin_z)
-            self.plane_normal.clamp_(-1, 1)
-            self.plane_normal.div_(self.plane_normal.norm())
+            self.phi.clamp_(-1, 1)
+            self.theta.clamp_(0, 1)
+            self.psi.clamp_(-1, 1)
 
         grid, plane_vwn = self.get_grid()
 
@@ -459,14 +522,14 @@ def test(file_b=None):
 
 
 def main(file_b,
-         initial_point=(200, 250, 20),
+         initial_point=(190., 260., 11.),
          initial_normal=(-1., -1., 0),
-         lr=2.e-6,
+         lr=1.e-5,
          max_iterations=2000,
          log_every=2,
          min_height=5,
          grid_size=9,
-         radius=6,
+         radius=4,
          step=0.4):
     b_data = torch.load(file_b).unsqueeze(0)
     bj = curl_to_j(b_data, step_mega_meters=step)
@@ -474,11 +537,7 @@ def main(file_b,
 
     writer = SummaryWriter('runs/test')
 
-    initial_normal = (-0.5069487516062562, 0.8619013500193842, 0.)
-    initial_point = (190., 260., 15.)
-    grid_size = 13
-
-    lr = 0
+    initial_normal = (0.5069487516062562, -0.8619013500193842, 0.)
 
     model = RopeFinder(initial_point,
                        min_height=min_height,
@@ -494,7 +553,7 @@ def main(file_b,
         model.train()
         optimizer.zero_grad()
         f_p, grad_f_p, j_p, grad_j_p, f_pl, j_pl = model(b_data, j)
-        loss = model.criterion(f_p, j_p, f_pl)
+        loss = model.criterion(f_p, j_p, f_pl, grad_f_p)
         loss.backward()
         optimizer.step()
         running_loss += loss.item()
@@ -502,7 +561,7 @@ def main(file_b,
             model.eval()
             print(f'Iter: {i}. Loss: {running_loss / log_every:.3f}')
             print(f'Initial point: {model.origin}')
-            print(f'Plane normal: {model.plane_normal.detach().cpu().numpy()}')
+            print(f'Plane normal: {model.current_normal().detach().cpu().numpy()}')
             print(f'Radius: {model.r}')
             fig_b, slice_b = plot_field(f_p, 'B', 'G', True, step=step)
             fig_j, slice_j = plot_field(j_p / 1000., 'j', r'10^{3} \cdot statA \cdot cm^{-2}', True, step=step)

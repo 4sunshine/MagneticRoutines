@@ -87,17 +87,21 @@ class RopeFinder(nn.Module):
         initial_normal /= torch.linalg.norm(initial_normal)
 
         self.plane_normal = initial_normal
+        # current_normal = self.current_normal()
+        self.plane_v, self.plane_w = self.plane_vw(initial_normal)
+
+        # self.plane_v, self.plane_w = self.plane_vw(self.plane_normal)  # INITIALIZE VW --> Vz == 0
+
         self.phi = nn.Parameter(torch.zeros((1,), dtype=torch.double))
         self.theta = nn.Parameter(torch.zeros((1,), dtype=torch.double))
         self.psi = nn.Parameter(torch.zeros((1,), dtype=torch.double))
         self.pi = torch.acos(torch.zeros(1)).item() * 2
 
-        current_normal = self.current_normal()
-        plane_v, plane_w = self.plane_vw(current_normal)
-        # self.plane_normal = nn.Parameter(initial_normal)
+        v, w, n = self.current_vwn()
 
-        self.plane_v = nn.Parameter(plane_v, requires_grad=False)
-        self.plane_w = nn.Parameter(plane_w, requires_grad=False)
+        self.plane_normal = nn.Parameter(initial_normal, requires_grad=False)
+        self.plane_v = nn.Parameter(v, requires_grad=False)
+        self.plane_w = nn.Parameter(w, requires_grad=False)
 
         self.margin_x = self.normalize_point(min_height, self.max_x)
         self.margin_y = self.normalize_point(min_height, self.max_y)
@@ -124,6 +128,14 @@ class RopeFinder(nn.Module):
         cn = cur_rotation @ self.plane_normal[:, None]
         cn = cn.T.squeeze(0)
         return cn
+
+    def current_vwn(self):
+        cur_rotation = euler_matrix(self.pi * self.phi, self.pi * self.theta, self.pi * self.psi)
+        default_vwn = torch.stack([self.plane_v, self.plane_w, self.plane_normal], dim=-1)
+        vwn = cur_rotation @ default_vwn
+        vwn = vwn.T
+        v, w, n = vwn
+        return v, w, n
 
     def normalize_point(self, x, max_size):
         factor = torch.tensor(2.) / torch.tensor(max_size - 1.).clamp(self.eps)
@@ -294,8 +306,9 @@ class RopeFinder(nn.Module):
         return r, phi
 
     def get_grid(self):
-        current_normal = self.current_normal()
-        plane_v, plane_w = self.plane_vw(current_normal)  #self.plane_normal)
+        #current_normal = self.current_normal()
+        #plane_v, plane_w = self.plane_vw(current_normal)  #self.plane_normal)
+        plane_v, plane_w, current_normal = self.current_vwn()
 
         grid_v = self.direction_points(self.v, plane_v)
         grid_w = self.direction_points(self.w, plane_w)
@@ -308,7 +321,7 @@ class RopeFinder(nn.Module):
         plane_grid[..., 1] += self.denormalize_point(self.o_y, self.max_y)
         plane_grid[..., 2] += self.denormalize_point(self.o_z, self.max_z)
 
-        plane_vwn = torch.stack([plane_v, plane_w, self.plane_normal], dim=0)
+        plane_vwn = torch.stack([plane_v, plane_w, current_normal], dim=0)
 
         return plane_grid, plane_vwn.double()
 
@@ -325,8 +338,9 @@ class RopeFinder(nn.Module):
         grid_ = grid * scale_factor[None, None, None, None, :] - 1.
 
         b = data.shape[0]
-        x = F.grid_sample(data, grid_.double().repeat_interleave(b, dim=0))
+        x = F.grid_sample(data, grid_.double().repeat_interleave(b, dim=0), padding_mode='border')
         return x
+
 
     def get_polar_matrix(self, r_phi):
         r, phi = r_phi

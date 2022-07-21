@@ -172,6 +172,12 @@ class RopeFinder(nn.Module):
         return f[..., self.grid_size - self.kernel_size: self.grid_size + self.kernel_size + 1,
                self.grid_size - self.kernel_size: self.grid_size + self.kernel_size + 1]
 
+    def horizontal_kernel(self, f):
+        return f[..., self.grid_size - self.kernel_size: self.grid_size + self.kernel_size + 1, :]
+
+    def vertical_kernel(self, f):
+        return f[..., self.grid_size - self.kernel_size: self.grid_size + self.kernel_size + 1]
+
     def criterion_non_db(self, b, j):
         """
         Implement here following:
@@ -204,7 +210,7 @@ class RopeFinder(nn.Module):
 
         return loss
 
-    def criterion(self, b, j, b_p, grad_b):
+    def criterion(self, b, j, b_p, grad_b, grad_grad_b=None):
         """
         Implement here following:
         loss = - Jz|0^2 - Bz|0^2  ############+ (meanBz - Bz_0)^2 + (meanJz - Jz_0)^2 + mean((grad_r Jz)^2) - mean((grad_r Jz|R)^2)
@@ -215,6 +221,8 @@ class RopeFinder(nn.Module):
         radial_mask = self.get_radial_mask() #.detach()
 
         mask_sum = torch.sum(radial_mask).detach()
+        mask_sum_horizontal = torch.sum(self.horizontal_kernel(radial_mask)).detach()
+        mask_sum_vertical = torch.sum(self.vertical_kernel(radial_mask)).detach()
 
         b_r, b_t, b_z = torch.chunk(b, 3, dim=1)
         j_r, j_t, j_z = torch.chunk(j, 3, dim=1)
@@ -229,21 +237,24 @@ class RopeFinder(nn.Module):
         mean_b = torch.sum(torch.abs(b_z) * radial_mask) / mask_sum + self.eps
         loss_b0z /= mean_b
 
-        loss_br = torch.sum((b_r ** 2) * radial_mask) / (mask_sum + self.eps) / 400. ** 2  #/ (b_z0 ** 2 + self.eps)
-        loss_jr = torch.sum((j_r ** 2) * radial_mask) / (mask_sum + self.eps) / 6000. ** 2  #/ (j_z0 ** 2 + self.eps)
+        loss_br = torch.sum(self.horizontal_kernel((b_r ** 2) * radial_mask)) / (mask_sum_horizontal + self.eps) / 400. ** 2  #/ (b_z0 ** 2 + self.eps)
+        loss_jr = torch.sum(self.horizontal_kernel((j_r ** 2) * radial_mask)) / (mask_sum_horizontal + self.eps) / 6000. ** 2  #/ (j_z0 ** 2 + self.eps)
 
-        # print(grad_b.shape)
         """
         Grads axial shape:
         B x 3[dR, dTHETA, dZ] x 3[R, THETA, Z] x D x H x W  
         """
         grad_b_r = grad_b[:, :2, 0, ...]
-        loss_grad_b_r = torch.mean(self.central_kernel(grad_b_r)) / 200. ** 2
-        # print(radial_mask.shape)
-        # print(grad_b_r.shape)
-        # print(loss_grad_b_r)
-        # print(loss_br)
-        # exit(0)
+        loss_grad_b_r = torch.sum(self.horizontal_kernel(grad_b_r) ** 2) / (mask_sum_horizontal + self.eps) / 200. ** 2
+
+        if grad_grad_b is not None:
+            """
+            Grad-grad axial shape:
+            B x 3[dR, dTHETA, dZ] x 3[dR, dTHETA, dZ] x 3[R, THETA, Z] x D x H x W 
+            """
+            loss_grad_grad_b_r = torch.sum(self.vertical_kernel(grad_grad_b[:, 0, 0, 0, ...]) ** 2) / (mask_sum_vertical + self.eps) / 100. ** 2
+        else:
+            loss_grad_grad_b_r = 0.
 
         radial_loss = - self.radius
 
@@ -255,7 +266,8 @@ class RopeFinder(nn.Module):
         direction_loss = b_central @ self.current_normal().unsqueeze(-1)
         direction_loss = -torch.mean(direction_loss)
 
-        loss = 2 * (loss_b0z + loss_j0) + loss_br + loss_jr + radial_loss + 2 * direction_loss + loss_grad_b_r
+        loss = 2 * (loss_b0z + loss_j0) + loss_br + loss_jr + radial_loss +\
+               2 * direction_loss + loss_grad_b_r + loss_grad_grad_b_r
 
         return loss
 
@@ -381,7 +393,14 @@ class RopeFinder(nn.Module):
         f_pol = self.cartesian_to_polar(field, polar_matrix)
         grad_f_pol_yx = torch.gradient(f_pol, spacing=1, dim=(-2, -1), edge_order=2)
         grads_axial = self.grad_to_polar(grad_f_pol_yx, polar_matrix)
-        return f_pol, grads_axial
+        batch, _, _, d, h, w = grads_axial.shape
+        grads_axial_reshaped = grads_axial.reshape(batch, 9, 1, d, h, w)
+        grads_axial_reshaped = grads_axial_reshaped.squeeze(dim=2)
+        grad_grad_f_pol_yx = torch.gradient(grads_axial_reshaped, spacing=1, dim=(-2, -1), edge_order=2)
+        grad_grad_axial = self.grad_to_polar(grad_grad_f_pol_yx, polar_matrix)
+        grad_grad_axial = grad_grad_axial.unsqueeze(3)
+        grad_grad_axial = grad_grad_axial.reshape(batch, 3, 3, 3, d, h, w)
+        return f_pol, grads_axial, grad_grad_axial
 
     def forward(self, f, j=None):
         # DO ALL NORMALIZATIONS BEFORE FORWARD PASS
@@ -399,24 +418,30 @@ class RopeFinder(nn.Module):
         if j is not None:
             f = torch.cat([f, j], dim=0)
 
-        f_p = self.slice_data(grid, f)
-        f_p = self.project_on_plane(f_p, plane_vwn)
-        f_pol, grad_f_pol = self.cylindrical_grad(f_p)
+        f_p_global = self.slice_data(grid, f)
+        f_p = self.project_on_plane(f_p_global, plane_vwn)
+        f_pol, grad_f_pol, grad_grad_f_pol = self.cylindrical_grad(f_p)
         if j is not None:
             bs = f_p.size(0)
             j_pol = f_pol[bs // 2:]
             f_pol = f_pol[: bs // 2]
             j_p = f_p[bs // 2:]
             f_p = f_p[: bs // 2]
+            j_p_global = f_p_global[bs // 2:]
+            f_p_global = f_p_global[: bs // 2]
 
             grad_j_pol = grad_f_pol[bs // 2:]
             grad_f_pol = grad_f_pol[: bs // 2]
+            grad_grad_j_pol = grad_grad_f_pol[bs // 2:]
+            grad_grad_f_pol = grad_grad_f_pol[: bs // 2]
         else:
             grad_j_pol = None
             j_pol = None
             j_p = None
+            grad_grad_j_pol = None
+            j_p_global = None
 
-        return f_pol, grad_f_pol, j_pol, grad_j_pol, f_p, j_p
+        return f_pol, grad_f_pol, j_pol, grad_j_pol, f_p, j_p, grad_grad_f_pol, grad_grad_j_pol, f_p_global
 
 
 def save(filename):
@@ -566,8 +591,8 @@ def main(file_b,
     for i in range(max_iterations):
         model.train()
         optimizer.zero_grad()
-        f_p, grad_f_p, j_p, grad_j_p, f_pl, j_pl = model(b_data, j)
-        loss = model.criterion(f_p, j_p, f_pl, grad_f_p)
+        f_p, grad_f_p, j_p, grad_j_p, f_pl, j_pl, grad_grad_f_p, grad_grad_j_p, f_p_global = model(b_data, j)
+        loss = model.criterion(f_p, j_p, f_p_global, grad_f_p, grad_grad_f_p)
         loss.backward()
         optimizer.step()
         running_loss += loss.item()

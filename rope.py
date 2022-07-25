@@ -109,7 +109,7 @@ class RopeFinder(nn.Module):
 
         self.min_radius = min_radius / grid_size
         self.grid_size = grid_size
-        self.radius = nn.Parameter(torch.tensor(0.5 * (self.min_radius + 1.)))
+        self.radius = nn.Parameter(torch.tensor(0.5 * (self.min_radius + 1. / 2.41)))
 
         initial_point = torch.tensor(initial_point, dtype=torch.double)
 
@@ -152,6 +152,11 @@ class RopeFinder(nn.Module):
     def get_radial_mask(self):
         exp_arg = self.k_e * (self.radius * self.grid_size - self.r_phi[0])
         mask = 1. / (1 + torch.exp(-exp_arg))
+        return mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)
+
+    def get_bessel_root_mask(self):
+        exp_arg = torch.pow(2.41 * self.radius * self.grid_size - self.r_phi[0], 2) / 2.
+        mask = torch.exp(-5. * exp_arg)
         return mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)
 
     @property
@@ -219,23 +224,27 @@ class RopeFinder(nn.Module):
         radius -> max
         """
         radial_mask = self.get_radial_mask() #.detach()
+        bessel_mask = self.get_bessel_root_mask()
 
         mask_sum = torch.sum(radial_mask).detach()
         mask_sum_horizontal = torch.sum(self.horizontal_kernel(radial_mask)).detach()
         mask_sum_vertical = torch.sum(self.vertical_kernel(radial_mask)).detach()
+        bessel_mask_sum = torch.sum(bessel_mask).detach()
 
         b_r, b_t, b_z = torch.chunk(b, 3, dim=1)
         j_r, j_t, j_z = torch.chunk(j, 3, dim=1)
 
         j_z0 = self.central_kernel(j_z)
         loss_j0 = - torch.mean(j_z0 ** 2)
-        mean_j = torch.sum((j_z ** 2) * radial_mask) / mask_sum + self.eps
+        mean_j = torch.sum((j_z ** 2) * radial_mask) / (mask_sum + self.eps)
         loss_j0 /= mean_j
 
         b_z0 = self.central_kernel(b_z)
         loss_b0z = - torch.mean(b_z0)
-        mean_b = torch.sum(torch.abs(b_z) * radial_mask) / mask_sum + self.eps
+        mean_b = torch.sum(torch.abs(b_z) * radial_mask) / (mask_sum + self.eps)
         loss_b0z /= mean_b
+
+        loss_b_z_bessel = torch.sum(bessel_mask * torch.pow(b_z, 2)) / (bessel_mask_sum + self.eps) / (400 ** 2.)
 
         loss_br = torch.sum(self.horizontal_kernel((b_r ** 2) * radial_mask)) / (mask_sum_horizontal + self.eps) / 400. ** 2  #/ (b_z0 ** 2 + self.eps)
         loss_jr = torch.sum(self.horizontal_kernel((j_r ** 2) * radial_mask)) / (mask_sum_horizontal + self.eps) / 6000. ** 2  #/ (j_z0 ** 2 + self.eps)
@@ -267,7 +276,7 @@ class RopeFinder(nn.Module):
         direction_loss = -torch.mean(direction_loss)
 
         loss = 2 * (loss_b0z + loss_j0) + loss_br + loss_jr + radial_loss +\
-               2 * direction_loss + loss_grad_b_r + loss_grad_grad_b_r
+               2 * direction_loss + loss_grad_b_r + loss_grad_grad_b_r + loss_b_z_bessel
 
         return loss
 
@@ -405,7 +414,7 @@ class RopeFinder(nn.Module):
     def forward(self, f, j=None):
         # DO ALL NORMALIZATIONS BEFORE FORWARD PASS
         with torch.no_grad():
-            self.radius.clamp_(self.min_radius, 1.)
+            self.radius.clamp_(self.min_radius, 1. / 2.41)
             self.o_x.clamp_(self.margin_x, -self.margin_x)
             self.o_y.clamp_(self.margin_y, -self.margin_y)
             self.o_z.clamp_(self.margin_z, -self.margin_z)
@@ -568,7 +577,7 @@ def main(file_b,
          log_every=2,
          min_height=5,
          grid_size=9,
-         radius=4,
+         radius=3,
          step=0.4):
     b_data = torch.load(file_b).unsqueeze(0)
     bj = curl_to_j(b_data, step_mega_meters=step)

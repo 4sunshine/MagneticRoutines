@@ -6,10 +6,12 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import numpy as np
+import os
 
 from tensorboardX import SummaryWriter
 
 from magnetic.sav2vtk import GXBox
+from fire import Fire
 
 
 def levi_civita_3d():
@@ -276,7 +278,7 @@ class RopeFinder(nn.Module):
         direction_loss = -torch.mean(direction_loss)
 
         loss = 2 * (loss_b0z + loss_j0) + loss_br + loss_jr + radial_loss +\
-               2 * direction_loss + loss_grad_b_r + loss_grad_grad_b_r + loss_b_z_bessel
+               2 * direction_loss + loss_grad_b_r + loss_grad_grad_b_r + 0.01 * loss_b_z_bessel
 
         return loss
 
@@ -573,19 +575,21 @@ def main(file_b,
          initial_point=(190., 260., 11.),
          initial_normal=(-1., -1., 0),
          lr=1.e-5,
-         max_iterations=2000,
+         max_iterations=40,
          log_every=2,
          min_height=5,
          grid_size=9,
          radius=3,
-         step=0.4):
+         step=0.4,
+         name='test'):
     b_data = torch.load(file_b).unsqueeze(0)
     bj = curl_to_j(b_data, step_mega_meters=step)
     j = curl(bj)
 
-    writer = SummaryWriter('runs/test')
+    output_dir = f'runs/{name}'
+    writer = SummaryWriter(output_dir)
 
-    initial_normal = (0.5069487516062562, -0.8619013500193842, 0.)
+    #initial_normal = (0.5069487516062562, -0.8619013500193842, 0.)
 
     model = RopeFinder(initial_point,
                        min_height=min_height,
@@ -620,8 +624,32 @@ def main(file_b,
             writer.add_scalar('Loss', running_loss / log_every, global_step=i)
             running_loss = 0.
 
+    # SAVE FINAL FIGURE
+    fig_b.savefig(os.path.join(output_dir, 'b_field.png'), bbox_inches='tight')
+    fig_j.savefig(os.path.join(output_dir, 'j_field.png'), bbox_inches='tight')
+    slice_b.savefig(os.path.join(output_dir, 'b_slice.png'), bbox_inches='tight')
+    slice_j.savefig(os.path.join(output_dir, 'j_slice.png'), bbox_inches='tight')
+
+    with open(os.path.join(output_dir, 'final_params.txt'), 'w') as f:
+        radius = f'Flux Rope Radius {step * model.r:3f} Mm'
+        height = f'Flux Rope Center Height {step * model.origin[-1]:3f} Mm'
+        position = f'Flux Rope Center Position {model.origin[0]:2f}, {model.origin[1]:2f}, {model.origin[2]:2f}'
+        normal = model.current_normal().detach().cpu().numpy()
+        normal_s = f'Flux Rope Center Normal {normal[0].item():3f}, {normal[1].item():3f}, {normal[2].item():3f}'
+        result = '\n'.join([radius, height, position, normal_s])
+        f.write(result)
+
 
 if __name__ == '__main__':
-    main('b_field.pt')
+    initial_point = (188., 308., 11.)
+    #initial_normal = (0.5069487516062562, -0.8619013500193842, 0.)
+    initial_normal = (-0.58, -0.81, 0.)
+    name = '_'.join([str(int(p)) for p in initial_point])
+    main('b_field.pt',
+         initial_point=initial_point,
+         initial_normal=initial_normal,
+         name=name,
+         max_iterations=200,
+         )
     #filename = sys.argv[1]
     #save(filename)

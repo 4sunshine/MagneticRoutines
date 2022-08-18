@@ -131,6 +131,9 @@ class RopeFinder(nn.Module):
         cn = cn.T.squeeze(0)
         return cn
 
+    def update_grid_size(self, grid_size):
+        self.r_phi, (self.v, self.w, self.zz) = self.prepare_regular_grid(grid_size)
+
     def current_vwn(self):
         cur_rotation = euler_matrix(self.pi * self.phi, self.pi * self.theta, self.pi * self.psi)
         default_vwn = torch.stack([self.plane_v, self.plane_w, self.plane_normal], dim=-1)
@@ -151,14 +154,20 @@ class RopeFinder(nn.Module):
     #     mask = self.r_phi[0] <= self.radius
     #     return mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)
 
-    def get_radial_mask(self):
+    def get_radial_mask(self, grid_z=None):
         exp_arg = self.k_e * (self.radius * self.grid_size - self.r_phi[0])
         mask = 1. / (1 + torch.exp(-exp_arg))
+        if grid_z is not None:
+            mask_z = grid_z >= 0.
+            mask = mask * mask_z
         return mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)
 
-    def get_bessel_root_mask(self):
+    def get_bessel_root_mask(self, grid_z=None):
         exp_arg = torch.pow(2.41 * self.radius * self.grid_size - self.r_phi[0], 2) / 2.
         mask = torch.exp(-5. * exp_arg)
+        if grid_z is not None:
+            mask_z = grid_z >= 0.
+            mask = mask * mask_z
         return mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)
 
     @property
@@ -217,7 +226,7 @@ class RopeFinder(nn.Module):
 
         return loss
 
-    def criterion(self, b, j, b_p, grad_b, grad_grad_b=None):
+    def criterion(self, b, j, b_p, grad_b, grad_grad_b=None, grid_z=None):
         """
         Implement here following:
         loss = - Jz|0^2 - Bz|0^2  ############+ (meanBz - Bz_0)^2 + (meanJz - Jz_0)^2 + mean((grad_r Jz)^2) - mean((grad_r Jz|R)^2)
@@ -225,8 +234,8 @@ class RopeFinder(nn.Module):
         mean (Jr^2) -> 0
         radius -> max
         """
-        radial_mask = self.get_radial_mask() #.detach()
-        bessel_mask = self.get_bessel_root_mask()
+        radial_mask = self.get_radial_mask(grid_z) #.detach()
+        bessel_mask = self.get_bessel_root_mask(grid_z)
 
         mask_sum = torch.sum(radial_mask).detach()
         mask_sum_horizontal = torch.sum(self.horizontal_kernel(radial_mask)).detach()
@@ -311,8 +320,11 @@ class RopeFinder(nn.Module):
         points = grid[None, ...] * direction.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
         return points
 
-    def prepare_regular_grid(self):
-        grid_xy = torch.arange(-self.grid_size, self.grid_size + 1)
+    def prepare_regular_grid(self, grid_size=None):
+        if grid_size is None:
+            grid_size = self.grid_size
+        assert isinstance(grid_size, int)
+        grid_xy = torch.arange(-grid_size, grid_size + 1)
         grid_z = torch.arange(self.z_depth)
 
         v, w, zz = torch.meshgrid(grid_xy, grid_xy, grid_z, indexing='xy')
@@ -413,7 +425,7 @@ class RopeFinder(nn.Module):
         grad_grad_axial = grad_grad_axial.reshape(batch, 3, 3, 3, d, h, w)
         return f_pol, grads_axial, grad_grad_axial
 
-    def forward(self, f, j=None):
+    def forward(self, f, j=None, eval_grid_size=None):
         # DO ALL NORMALIZATIONS BEFORE FORWARD PASS
         with torch.no_grad():
             self.radius.clamp_(self.min_radius, 1. / 2.41)
@@ -423,6 +435,9 @@ class RopeFinder(nn.Module):
             self.phi.clamp_(-1, 1)
             self.theta.clamp_(0, 1)
             self.psi.clamp_(-1, 1)
+
+        if eval_grid_size is not None:
+            self.update_grid_size(eval_grid_size)
 
         grid, plane_vwn = self.get_grid()
 
@@ -452,7 +467,9 @@ class RopeFinder(nn.Module):
             grad_grad_j_pol = None
             j_p_global = None
 
-        return f_pol, grad_f_pol, j_pol, grad_j_pol, f_p, j_p, grad_grad_f_pol, grad_grad_j_pol, f_p_global
+        coord_data = (grid, plane_vwn)
+
+        return f_pol, grad_f_pol, j_pol, grad_j_pol, f_p, j_p, grad_grad_f_pol, grad_grad_j_pol, f_p_global, coord_data
 
 
 def save(filename):
@@ -487,7 +504,7 @@ def save_points(data, plane_n, grid_size):
     pointsToVTK('plane_vtk', x_points, y_points, z_points, {'source': test_data})
 
 
-def plot_field(f, name='B', units='G', is_polar=False, z_slice=0, nrows=1, tb_log=True, step=0.4):
+def plot_field(f, name='B', units='G', is_polar=False, z_slice=0, nrows=1, tb_log=True, step=0.4, grid_z=None):
     def prepare_labels(field_name, field_units, polar=False):
         if polar:
             lower_names = ('r', r'\tau', 'z')
@@ -503,8 +520,16 @@ def plot_field(f, name='B', units='G', is_polar=False, z_slice=0, nrows=1, tb_lo
     batch, dim, depth, height, width = f.shape
     x_labels = list(range(- (width // 2), width // 2 + 1))
     x_labels = [step * x for x in x_labels]
-    y_labels = list(range(height // 2, - (height // 2 + 1), -1))
-    y_labels = [step * x for x in y_labels]
+    if grid_z is None:
+        y_labels = list(range(height // 2, - (height // 2 + 1), -1))
+        y_labels = [step * x for x in y_labels]
+    else:
+        grid_z *= step
+        grid_z = torch.flip(grid_z, dims=(0,)).detach().cpu().numpy()
+        f = np.where(grid_z[None, None, None, ...] >= 0., f, 0.)
+        y_labels = grid_z[:, width // 2]
+        y_labels = [yl.item() for yl in y_labels]
+
     data = f[0]
     fig, axs = plt.subplots(nrows=nrows, ncols=dim,
                             gridspec_kw=dict(height_ratios=[1], width_ratios=[1] * dim))
@@ -581,13 +606,15 @@ def main(file_b,
          grid_size=9,
          radius=3,
          step=0.4,
-         name='test'):
+         name='test',
+         train=False,
+         ):
     b_data = torch.load(file_b).unsqueeze(0)
     bj = curl_to_j(b_data, step_mega_meters=step)
     j = curl(bj)
 
     output_dir = f'runs/{name}'
-    writer = SummaryWriter(output_dir)
+    writer = SummaryWriter(output_dir) if train else None
 
     #initial_normal = (0.5069487516062562, -0.8619013500193842, 0.)
 
@@ -601,34 +628,49 @@ def main(file_b,
 
     running_loss = 0.0
 
-    for i in range(max_iterations):
-        model.train()
-        optimizer.zero_grad()
-        f_p, grad_f_p, j_p, grad_j_p, f_pl, j_pl, grad_grad_f_p, grad_grad_j_p, f_p_global = model(b_data, j)
-        loss = model.criterion(f_p, j_p, f_p_global, grad_f_p, grad_grad_f_p)
-        loss.backward()
-        optimizer.step()
-        running_loss += loss.item()
-        if i % log_every == 0:
-            model.eval()
-            print(f'Iter: {i}. Loss: {running_loss / log_every:.3f}')
-            print(f'Initial point: {model.origin}')
-            print(f'Plane normal: {model.current_normal().detach().cpu().numpy()}')
-            print(f'Radius: {model.r}')
-            fig_b, slice_b = plot_field(f_p, 'B', 'G', True, step=step)
-            fig_j, slice_j = plot_field(j_p / 1000., 'j', r'10^{3} \cdot statA \cdot cm^{-2}', True, step=step)
-            writer.add_figure('B field', fig_b, global_step=i)
-            writer.add_figure('B slice', slice_b, global_step=i)
-            writer.add_figure('J field', fig_j, global_step=i)
-            writer.add_figure('J slice', slice_j, global_step=i)
-            writer.add_scalar('Loss', running_loss / log_every, global_step=i)
-            running_loss = 0.
+    if train:
+        for i in range(max_iterations):
+            model.train()
+            optimizer.zero_grad()
+            f_p, grad_f_p, j_p, grad_j_p, f_pl, j_pl, grad_grad_f_p, grad_grad_j_p, f_p_global, coord = model(b_data, j)
+            grid, plane_uvn = coord
+            grid = grid.squeeze(0)
+            grid_z = grid[..., 2]
+            loss = model.criterion(f_p, j_p, f_p_global, grad_f_p, grad_grad_f_p, grid_z)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+            if i % log_every == 0:
+                model.eval()
+                print(f'Iter: {i}. Loss: {running_loss / log_every:.3f}')
+                print(f'Initial point: {model.origin}')
+                print(f'Plane normal: {model.current_normal().detach().cpu().numpy()}')
+                print(f'Radius: {model.r}')
+                fig_b, slice_b = plot_field(f_p, 'B', 'G', True, step=step)
+                fig_j, slice_j = plot_field(j_p / 1000., 'j', r'10^{3} \cdot statA \cdot cm^{-2}', True, step=step)
+                writer.add_figure('B field', fig_b, global_step=i)
+                writer.add_figure('B slice', slice_b, global_step=i)
+                writer.add_figure('J field', fig_j, global_step=i)
+                writer.add_figure('J slice', slice_j, global_step=i)
+                writer.add_scalar('Loss', running_loss / log_every, global_step=i)
+                running_loss = 0.
+    model.eval()
+    with torch.no_grad():
+        f_p, grad_f_p, j_p, grad_j_p, f_pl, j_pl, grad_grad_f_p, grad_grad_j_p, f_p_global, coord = model(b_data, j, 19)
+        grid, plane_uvn = coord
+        grid = grid.squeeze(0)
+        grid_z = grid[..., 2]
+        fig_b, slice_b = plot_field(f_p, 'B', 'G', True, step=step, grid_z=grid_z)
+        fig_j, slice_j = plot_field(j_p / 1000., 'j', r'10^{3} \cdot statA \cdot cm^{-2}', True,
+                                    step=step, grid_z=grid_z)
 
     # SAVE FINAL FIGURE
     fig_b.savefig(os.path.join(output_dir, 'b_field.png'), bbox_inches='tight')
     fig_j.savefig(os.path.join(output_dir, 'j_field.png'), bbox_inches='tight')
     slice_b.savefig(os.path.join(output_dir, 'b_slice.png'), bbox_inches='tight')
     slice_j.savefig(os.path.join(output_dir, 'j_slice.png'), bbox_inches='tight')
+
+    torch.save(model.state_dict(), os.path.join(output_dir, "model.pth"))
 
     with open(os.path.join(output_dir, 'final_params.txt'), 'w') as f:
         radius = f'Flux Rope Radius {step * model.r:3f} Mm'
@@ -641,15 +683,19 @@ def main(file_b,
 
 
 if __name__ == '__main__':
-    initial_point = (188., 308., 11.)
-    #initial_normal = (0.5069487516062562, -0.8619013500193842, 0.)
-    initial_normal = (-0.58, -0.81, 0.)
+    #initial_point = (188., 308., 11.)
+    initial_point = (190., 261., 11.)
+    initial_normal = (0.5069487516062562, -0.8619013500193842, 0.)
+    #initial_normal = (-0.58, -0.81, 0.)
+    #initial_normal = (-0.591682, -0.801095, 0.090322)
     name = '_'.join([str(int(p)) for p in initial_point])
     main('b_field.pt',
          initial_point=initial_point,
          initial_normal=initial_normal,
          name=name,
          max_iterations=200,
+         grid_size=9,
+         train=True,
          )
     #filename = sys.argv[1]
     #save(filename)

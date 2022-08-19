@@ -523,10 +523,16 @@ def plot_field(f, name='B', units='G', is_polar=False, z_slice=0, nrows=1, tb_lo
     if grid_z is None:
         y_labels = list(range(height // 2, - (height // 2 + 1), -1))
         y_labels = [step * x for x in y_labels]
+        y_keep_size = height
     else:
         grid_z *= step
         grid_z = torch.flip(grid_z, dims=(0,)).detach().cpu().numpy()
-        f = np.where(grid_z[None, None, None, ...] >= 0., f, 0.)
+        grid_z_mask = grid_z >= 0.  #grid_z[None, None, None, ...] >= 0.
+        grid_z_cut = np.any(grid_z_mask, axis=-1, keepdims=False)
+        f = np.where(grid_z_mask[None, None, None, ...], f, 0.)
+        y_keep_size = min(max(grid_z_cut.sum(), 1), height)
+        grid_z = grid_z[:y_keep_size, :]
+        f = f[..., :y_keep_size, :]
         y_labels = grid_z[:, width // 2]
         y_labels = [yl.item() for yl in y_labels]
 
@@ -545,6 +551,7 @@ def plot_field(f, name='B', units='G', is_polar=False, z_slice=0, nrows=1, tb_lo
         axs[j].set_yticks(list(range(0, len(y_labels), 3)))
         axs[j].set_yticklabels([f'{y:.1f}' for y in y_labels[::3]])
         axs[j].set_xticklabels([f'{x:.1f}' for x in x_labels[::3]])
+        axs[j].plot(width // 2, height // 2, ".k")
 
     fig_p, axs_p = plt.subplots(nrows=1, ncols=2, sharey=True,
                                 gridspec_kw=dict(height_ratios=[1], width_ratios=[1] * 2))
@@ -562,6 +569,7 @@ def plot_field(f, name='B', units='G', is_polar=False, z_slice=0, nrows=1, tb_lo
     sns.lineplot(data=df_x, ax=axs_p[0], markers=True).set(title=f"u-axis slice", xlabel="x, Mm",
                                                            ylabel=rf"${name}, {units}$")
     axs_p[0].grid()
+    axs_p[0].axvline(x=x_labels[width // 2], linestyle='dashed', color='black', lw=1.5)
 
     field_v = field[..., width // 2 - 1: width // 2 + 2]
 
@@ -573,6 +581,7 @@ def plot_field(f, name='B', units='G', is_polar=False, z_slice=0, nrows=1, tb_lo
     sns.lineplot(data=df_y, ax=axs_p[1], markers=True).set(title=f"v-axis slice", xlabel="y, Mm",
                                                            ylabel=rf"${name}, {units}$")
     axs_p[1].grid()
+    axs_p[1].axvline(x=y_labels[height // 2], linestyle='dashed', color='black', lw=1.5)
 
     if tb_log:
         return fig, fig_p
@@ -656,13 +665,13 @@ def main(file_b,
                 running_loss = 0.
     model.eval()
     with torch.no_grad():
-        f_p, grad_f_p, j_p, grad_j_p, f_pl, j_pl, grad_grad_f_p, grad_grad_j_p, f_p_global, coord = model(b_data, j, 19)
+        f_p, grad_f_p, j_p, grad_j_p, f_pl, j_pl, grad_grad_f_p, grad_grad_j_p, f_p_global, coord = model(b_data, j, 29)
         grid, plane_uvn = coord
         grid = grid.squeeze(0)
         grid_z = grid[..., 2]
-        fig_b, slice_b = plot_field(f_p, 'B', 'G', True, step=step, grid_z=grid_z)
+        fig_b, slice_b = plot_field(f_p, 'B', 'G', True, step=step, grid_z=grid_z.clone())
         fig_j, slice_j = plot_field(j_p / 1000., 'j', r'10^{3} \cdot statA \cdot cm^{-2}', True,
-                                    step=step, grid_z=grid_z)
+                                    step=step, grid_z=grid_z.clone())
 
     # SAVE FINAL FIGURE
     fig_b.savefig(os.path.join(output_dir, 'b_field.png'), bbox_inches='tight')
@@ -683,17 +692,17 @@ def main(file_b,
 
 
 if __name__ == '__main__':
-    #initial_point = (188., 308., 11.)
-    initial_point = (190., 261., 11.)
-    initial_normal = (0.5069487516062562, -0.8619013500193842, 0.)
-    #initial_normal = (-0.58, -0.81, 0.)
+    initial_point = (176., 279., 11.)
+    #initial_point = (190., 261., 11.)
+    #initial_normal = (0.5069487516062562, -0.8619013500193842, 0.)
+    initial_normal = (0.36, -0.93, 0.)
     #initial_normal = (-0.591682, -0.801095, 0.090322)
     name = '_'.join([str(int(p)) for p in initial_point])
     main('b_field.pt',
          initial_point=initial_point,
          initial_normal=initial_normal,
          name=name,
-         max_iterations=200,
+         max_iterations=150,
          grid_size=9,
          train=True,
          )

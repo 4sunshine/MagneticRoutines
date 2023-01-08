@@ -76,11 +76,15 @@ def create_datasets(num_points=80, val_part=0.3, transform=identity, target_fn=f
 
 
 class Tracer(nn.Module):
-    def __init__(self):
+    def __init__(self, last_relu=True):
         super(Tracer, self).__init__()
 
-        in_out_feats = [(1, 10), (10, 100), (100, 1)]
-        act_fn = [nn.ReLU(), nn.ReLU(), nn.ReLU()]
+        in_out_feats = [(1, 100), (100, 10), (10, 1)]
+        act_fn = [nn.ReLU(), nn.ReLU()]
+        if last_relu:
+            act_fn.append(nn.ReLU())
+        else:
+            act_fn.append(nn.Identity())
 
         self.net = nn.Sequential(*[
             lin_act(in_dim, out_dim, act) for (in_dim, out_dim), act in zip(in_out_feats, act_fn)
@@ -99,7 +103,7 @@ class Tracer(nn.Module):
         input_x.requires_grad = True
         f = self(input_x)
         df_x = grad(f, input_x, grad_outputs=torch.ones_like(input_x), create_graph=True)[0]
-        loss = F.mse_loss(df_x, torch.zeros_like(df_x))
+        loss = F.mse_loss(df_x, 5 * torch.ones_like(df_x))
         return loss
 
     def loss_test(self, x, y):
@@ -147,13 +151,30 @@ def train(model, loader, optimizer, writer, epoch):
     return ema.ema
 
 
+def train_diff(model, loader, optimizer, writer, epoch):
+    ema = EMA()
+    model.train()
+    for i, data in enumerate(loader):
+        x, y = data
+        optimizer.zero_grad()
+        loss = model.loss_equation(x)
+        #y_pred = model(x)
+        #loss = F.mse_loss(y_pred, y)
+        loss.backward()
+        optimizer.step()
+        ema.append(loss.item())
+
+    writer.add_scalar("diff_train_loss", ema.ema, global_step=epoch)
+
+    return ema.ema
+
+
 @torch.no_grad()
 def evaluate(model, loader, writer, epoch):
     ema = EMA()
     model.eval()
-    all_x = []
-    all_y = []
-    all_pred = []
+    all_x, all_y, all_pred = [], [], []
+
     for i, data in enumerate(loader):
         x, y = data
         pred = model(x)
@@ -169,8 +190,36 @@ def evaluate(model, loader, writer, epoch):
 
     image = plot_1d(all_x, all_y, all_pred)
 
-    writer.add_scalar("val_loss", ema.ema, global_step=epoch)
-    writer.add_figure("prediction", image, global_step=epoch)
+    if writer:
+        writer.add_scalar("val_loss", ema.ema, global_step=epoch)
+        writer.add_figure("prediction", image, global_step=epoch)
+
+    return ema.ema
+
+
+def evaluate_diff(model, loader, writer, epoch):
+    ema = EMA()
+    model.eval()
+    all_x, all_y, all_pred = [], [], []
+
+    for i, data in enumerate(loader):
+        x, y = data
+        pred = model(x)
+        loss = model.loss_equation(x)
+        ema.append(loss.item())
+        all_pred.append(pred)
+        all_x.append(x)
+        all_y.append(y)
+
+    all_x = torch.cat(all_x, dim=0)
+    all_y = torch.cat(all_y, dim=0)
+    all_pred = torch.cat(all_pred, dim=0)
+
+    image = plot_1d(all_x, all_y, all_pred)
+
+    if writer:
+        writer.add_scalar("val_diff_loss", ema.ema, global_step=epoch)
+        writer.add_figure("prediction_diff", image, global_step=epoch)
 
     return ema.ema
 
@@ -179,6 +228,7 @@ def test_run(experiment_name='test'):
     model = Tracer()
     torch.manual_seed(2023)
     random.seed(2023)
+    np.random.seed(2023)
 
     train_ds, val_ds = create_datasets(num_points=80, val_part=0.3, transform=identity, target_fn=fn_squared)
 
@@ -186,16 +236,75 @@ def test_run(experiment_name='test'):
     val_loader = DataLoader(val_ds, shuffle=False)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
-    writer = SummaryWriter(f'output/{experiment_name}')
+    writer = SummaryWriter(f'output/{experiment_name}/logs')
+
+    best = 1e16
+    best_epoch = 0
+    model_save_path = f'output/{experiment_name}/checkpoint_best.pth'
 
     for epoch in range(1000):
         train_loss = train(model, train_loader, optimizer, writer, epoch)
         val_loss = evaluate(model, val_loader, writer, epoch)
 
+        if val_loss < best:
+            best = val_loss
+            best_epoch = epoch
+            torch.save(model.state_dict(), model_save_path)
+            print('Saving model to %s' % model_save_path)
+
         if (epoch % 10) == 0:
-            print('Epoch: %d train loss: %.4f val loss: %.4f' % (epoch, train_loss, val_loss))
+            print('Epoch: %d train loss: %.4f val loss: %.4f best epoch: %d'
+                  % (epoch, train_loss, val_loss, best_epoch))
+
+    print('Training finished')
+    model.load_state_dict(torch.load(model_save_path))
+    print('Best checkpoint evaluation')
+    val_loss = evaluate(model, val_loader, None, None)
+    print('Best model val loss is %.4f' % val_loss)
+
+
+def diff_run(experiment_name='diff', checkpoint_path='output/test/checkpoint_best.pth'):
+    model = Tracer(last_relu=False)
+    model.load_state_dict(torch.load(checkpoint_path))
+    torch.manual_seed(2023)
+    random.seed(2023)
+    np.random.seed(2023)
+
+    train_ds, val_ds = create_datasets(num_points=80, val_part=0.3, transform=identity, target_fn=fn_squared)
+
+    train_loader = DataLoader(train_ds, shuffle=True, batch_size=2)
+    val_loader = DataLoader(val_ds, shuffle=False)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+    writer = SummaryWriter(f'output/{experiment_name}/logs')
+
+    best = 1e16
+    best_epoch = 0
+    model_save_path = f'output/{experiment_name}/checkpoint_best.pth'
+
+    for epoch in range(1000):
+        train_loss = train_diff(model, train_loader, optimizer, writer, epoch)
+        val_loss = evaluate_diff(model, val_loader, writer, epoch)
+
+        if val_loss < best:
+            best = val_loss
+            best_epoch = epoch
+            # torch.save(model.state_dict(), model_save_path)
+            # print('Saving model to %s' % model_save_path)
+
+        if (epoch % 10) == 0:
+            print('Epoch: %d train loss: %.4f val loss: %.4f best epoch: %d'
+                  % (epoch, train_loss, val_loss, best_epoch))
+
+    print('Training finished')
+    # model.load_state_dict(torch.load(model_save_path))
+    print('Best checkpoint evaluation')
+    val_loss = evaluate_diff(model, val_loader, None, None)
+    print('Best model val loss is %.4f' % val_loss)
+
 
 
 if __name__ == "__main__":
-    test_run()
+    diff_run()
+    #test_run()
 

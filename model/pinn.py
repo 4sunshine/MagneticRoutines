@@ -4,12 +4,15 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import functorch as FT
 import matplotlib.pyplot as plt
 
+from utils.utils import EMA
 from PIL import Image
 from torch.autograd import grad
 from torch.utils.data import Dataset, DataLoader
 from tensorboardX import SummaryWriter
+
 
 
 def lin_act(in_dim, out_dim, act, bias=True):
@@ -116,22 +119,59 @@ class Tracer(nn.Module):
         pass
 
 
-class EMA(object):
-    def __init__(self, alpha=0.1):
-        self._alpha = alpha
-        self._counter = 0
-        self._ema = 0
+class PINN_MLP(nn.Module):
+    def __init__(self, in_dim=3, out_dim=3, hidden_1=100, hidden_2=10, last_relu=True):
+        super(PINN_MLP, self).__init__()
 
-    @property
-    def ema(self):
-        return self._ema
-
-    def append(self, value):
-        if self._counter > 0:
-            self._ema += self._alpha * (value - self._ema)
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.hidden_1 = hidden_1
+        self.hidden_2 = hidden_2
+        in_out_feats = [(self.in_dim, self.hidden_1), (self.hidden_1, self.hidden_2), (self.hidden_2, self.out_dim)]
+        act_fn = [nn.ReLU(), nn.ReLU()]
+        if last_relu:
+            act_fn.append(nn.ReLU())
         else:
-            self._ema = value
-        self._counter += 1
+            act_fn.append(nn.Identity())
+
+        self.net = nn.Sequential(*[
+            lin_act(in_dim, out_dim, act) for (in_dim, out_dim), act in zip(in_out_feats, act_fn)
+        ])
+
+        self.net.apply(init_weights)
+
+    def forward(self, x):
+        return self.net(x)
+
+    def loss_boundary(self, x, boundary_field):
+        f = self(x)
+        loss = F.mse_loss(f, boundary_field)
+        return loss
+
+    def loss_equation(self, x):
+        input_x = x.clone()
+        input_x.requires_grad_()  # = True
+        batch_size = input_x.shape[0]
+        f = self(input_x)
+        print(input_x.shape)
+        print(f.shape)
+        ### TODO: apply functorch vmap for batched gradient
+        df_x = grad(f, input_x, grad_outputs=torch.ones([batch_size, self.in_dim]),
+                    create_graph=True, is_grads_batched=True)  # grad_outputs=torch.ones_like(input_x),
+        print(df_x)
+        exit(0)
+        loss = 0
+        # loss = F.mse_loss(df_x, 5 * torch.ones_like(df_x))
+        return loss
+
+    def loss_test(self, x, y):
+        f = self(x)
+        loss = F.mse_loss(f, y)
+        # print(f.item(), (x**2).item(), loss.item())
+        return loss
+
+    def loss(self, x):
+        pass
 
 
 def train(model, loader, optimizer, writer, epoch):
@@ -303,8 +343,8 @@ def diff_run(experiment_name='diff', checkpoint_path='output/test/checkpoint_bes
     print('Best model val loss is %.4f' % val_loss)
 
 
-
 if __name__ == "__main__":
-    diff_run()
-    #test_run()
+    experiment_name = 'check'
+    #test_run(experiment_name)
+    diff_run(checkpoint_path=f'output/{experiment_name}/checkpoint_best.pth')
 

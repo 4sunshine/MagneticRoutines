@@ -2,6 +2,7 @@ import sys
 import torch
 import random
 import numpy as np
+import tqdm
 
 from torch.utils.data import DataLoader
 from model.pinn import PINN_MLP
@@ -15,8 +16,12 @@ import torch.nn.functional as F
 def train(model, loader, optimizer, writer, epoch):
     ema = EMA()
     model.train()
-    for i, data in enumerate(loader):
+    for i, data in enumerate(tqdm.tqdm(loader)):
         coord, field, boundary_coord, boundary = data
+        coord = coord.cuda()
+        #field = field.cuda()
+        boundary_coord = boundary_coord.cuda()
+        boundary = boundary.cuda()
         optimizer.zero_grad()
         loss_equation = model.loss_equation(coord)
         loss_boundary = model.loss_boundary(boundary_coord, boundary)
@@ -59,7 +64,7 @@ def evaluate(model, loader, writer, epoch):
 
 
 def main(experiment_name='potential_test'):
-    model = PINN_MLP(last_relu=False)
+    model = PINN_MLP(last_relu=False).cuda()
     torch.manual_seed(2023)
     random.seed(2023)
     np.random.seed(2023)
@@ -67,8 +72,8 @@ def main(experiment_name='potential_test'):
     train_ds = BOXDataset('output/b_field.pt')
     val_ds = BOXDataset('output/b_field.pt')
 
-    train_loader = DataLoader(train_ds, shuffle=True, batch_size=2)
-    val_loader = DataLoader(val_ds, shuffle=False, batch_size=2)
+    train_loader = DataLoader(train_ds, shuffle=True, batch_size=1024)
+    val_loader = DataLoader(val_ds, shuffle=False, batch_size=1024)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 

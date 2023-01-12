@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import functorch as FT
+import functorch
 import matplotlib.pyplot as plt
 
 from utils.utils import EMA
@@ -151,17 +151,31 @@ class PINN_MLP(nn.Module):
     def loss_equation(self, x):
         input_x = x.clone()
         input_x.requires_grad_()  # = True
-        batch_size = input_x.shape[0]
+
+        batch_size, dim = input_x.shape[:2]
+        gather_ind = torch.arange(batch_size).repeat_interleave(dim).unsqueeze(1).unsqueeze(1).repeat_interleave(dim, -1)
+        gather_ind = gather_ind.to(input_x.device)
+
         f = self(input_x)
-        print(input_x.shape)
-        print(f.shape)
-        ### TODO: apply functorch vmap for batched gradient
-        df_x = grad(f, input_x, grad_outputs=torch.ones([batch_size, self.in_dim]),
-                    create_graph=True, is_grads_batched=True)  # grad_outputs=torch.ones_like(input_x),
-        print(df_x)
-        exit(0)
-        loss = 0
-        # loss = F.mse_loss(df_x, 5 * torch.ones_like(df_x))
+
+        f = f.flatten()
+
+        def c_jac():
+            def get_vjp(v):
+                return torch.autograd.grad(f, input_x, v)
+
+            I_N = torch.eye(len(f)).to(f.device)
+
+            jacobian = functorch.vmap(get_vjp)(I_N)
+
+            return jacobian
+
+        jac = c_jac()[0]
+        gathered_grad = torch.gather(jac, 1, gather_ind)
+        gathered_grad = gathered_grad.reshape((batch_size, dim, dim))
+        # batch; d result x,y,z; d x,y,z.
+
+        loss = F.mse_loss(gathered_grad, torch.zeros_like(gathered_grad))
         return loss
 
     def loss_test(self, x, y):

@@ -13,15 +13,15 @@ from tensorboardX import SummaryWriter
 import torch.nn.functional as F
 
 
-def train(model, loader, optimizer, writer, epoch):
+def train(model, loader, optimizer, writer, epoch, device):
     ema = EMA()
     model.train()
     for i, data in enumerate(tqdm.tqdm(loader)):
         coord, field, boundary_coord, boundary = data
-        coord = coord.cuda()
+        coord = coord.to(device, non_blocking=True)
         #field = field.cuda()
-        boundary_coord = boundary_coord.cuda()
-        boundary = boundary.cuda()
+        boundary_coord = boundary_coord.to(device, non_blocking=True)
+        boundary = boundary.to(device, non_blocking=True)
         optimizer.zero_grad()
         loss_equation = model.loss_equation(coord)
         loss_boundary = model.loss_boundary(boundary_coord, boundary)
@@ -36,15 +36,18 @@ def train(model, loader, optimizer, writer, epoch):
 
 
 @torch.no_grad()
-def evaluate(model, loader, writer, epoch):
+def evaluate(model, loader, writer, epoch, device):
     ema = EMA()
     model.eval()
     all_x, all_y, all_pred = [], [], []
 
-    for i, data in enumerate(loader):
+    for i, data in enumerate(tqdm.tqdm(loader)):
         coord, field, boundary_coord, boundary = data
-        pred = model(coord)
-        loss = F.mse_loss(pred, field)
+        boundary_coord = boundary_coord.to(device, non_blocking=True)
+        boundary = boundary.to(device, non_blocking=True)
+        # pred = model(coord)
+        loss = model.loss_boundary(boundary_coord, boundary)
+        # loss = F.mse_loss(pred, field)
         ema.append(loss.item())
         # all_pred.append(pred)
         # all_x.append(x)
@@ -63,14 +66,31 @@ def evaluate(model, loader, writer, epoch):
     return ema.ema
 
 
-def main(experiment_name='potential_test'):
-    model = PINN_MLP(last_relu=False).cuda()
+def main(
+        experiment_name='potential_experiment',
+        data_file='output/b_field.pt',
+        log_every=1,
+):
     torch.manual_seed(2023)
     random.seed(2023)
     np.random.seed(2023)
 
-    train_ds = BOXDataset('output/b_field.pt')
-    val_ds = BOXDataset('output/b_field.pt')
+    model = PINN_MLP(last_relu=False)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+
+    data_cube = torch.load(data_file).float()
+    data_cube = data_cube[..., ::2, ::2, ::2]
+
+    def normalize_data_cube(d):
+        d_std, d_mean = torch.std_mean(d, dim=(-3, -2, -1), keepdim=True)
+        return (d - d_mean) / d_std
+
+    data_cube = normalize_data_cube(data_cube)
+
+    train_ds = BOXDataset(data_cube)
+    val_ds = BOXDataset(data_cube)
 
     train_loader = DataLoader(train_ds, shuffle=True, batch_size=1024)
     val_loader = DataLoader(val_ds, shuffle=False, batch_size=1024)
@@ -84,23 +104,23 @@ def main(experiment_name='potential_test'):
     model_save_path = f'output/{experiment_name}/checkpoint_best.pth'
 
     for epoch in range(1000):
-        train_loss = train(model, train_loader, optimizer, writer, epoch)
-        val_loss = evaluate(model, val_loader, writer, epoch)
+        train_loss = train(model, train_loader, optimizer, writer, epoch, device)
+        val_loss = evaluate(model, val_loader, writer, epoch, device)
 
         if val_loss < best:
             best = val_loss
             best_epoch = epoch
-            #torch.save(model.state_dict(), model_save_path)
-            #print('Saving model to %s' % model_save_path)
+            torch.save(model.state_dict(), model_save_path)
+            print('Saving model to %s' % model_save_path)
 
-        if (epoch % 10) == 0:
+        if (epoch % log_every) == 0:
             print('Epoch: %d train loss: %.4f val loss: %.4f best epoch: %d'
                   % (epoch, train_loss, val_loss, best_epoch))
 
     print('Training finished')
-    # model.load_state_dict(torch.load(model_save_path))
+    model.load_state_dict(torch.load(model_save_path))
     print('Best checkpoint evaluation')
-    val_loss = evaluate(model, val_loader, None, None)
+    val_loss = evaluate(model, val_loader, None, None, device)
     print('Best model val loss is %.4f' % val_loss)
 
 

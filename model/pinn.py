@@ -8,6 +8,7 @@ import functorch
 import matplotlib.pyplot as plt
 
 from utils.utils import EMA
+from utils.maths import curl, divergence
 from PIL import Image
 from torch.autograd import grad
 from torch.utils.data import Dataset, DataLoader
@@ -120,7 +121,7 @@ class Tracer(nn.Module):
 
 
 class PINN_MLP(nn.Module):
-    def __init__(self, in_dim=3, out_dim=3, hidden_1=100, hidden_2=10, last_relu=True):
+    def __init__(self, in_dim=3, out_dim=3, hidden_1=100, hidden_2=100, last_relu=True):
         super(PINN_MLP, self).__init__()
 
         self.in_dim = in_dim
@@ -175,8 +176,13 @@ class PINN_MLP(nn.Module):
         gathered_grad = gathered_grad.reshape((batch_size, dim, dim))
         # batch; d result x,y,z; d x,y,z.
 
-        loss = F.mse_loss(gathered_grad, torch.zeros_like(gathered_grad))
-        return loss
+        rot_f = curl(gathered_grad)
+        div_f = divergence(gathered_grad)
+
+        loss_rot = F.mse_loss(rot_f, torch.zeros_like(rot_f))
+        loss_div = F.mse_loss(div_f, torch.zeros_like(div_f))
+
+        return loss_rot + loss_div
 
     def loss_test(self, x, y):
         f = self(x)

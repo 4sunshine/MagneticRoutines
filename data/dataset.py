@@ -43,8 +43,8 @@ class BOXDataset(Dataset):
     height = H: H ^|^| OY
     width = W: W ^|^| OX
     """
-    def __init__(self, data_file, transform=None, train_val_mask=None):
-        self.data = torch.load(data_file).float()
+    def __init__(self, data, transform=None, train_val_mask=None):
+        self.data = data
         self.transform = transform
         self.bottom_boundary = bottom_slice(self.data)
         self.z_max, self.y_max, self.x_max = self.data.shape[-3:]

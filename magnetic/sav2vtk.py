@@ -1,3 +1,6 @@
+import sys
+
+import torch
 import numpy as np
 from pyevtk.hl import imageToVTK, gridToVTK, pointsToVTK
 import glob
@@ -308,4 +311,13 @@ def files_list(path, filter):
     files = sorted(glob.glob(f'{path}/*{filter}'))
     print(f'Found {len(files)} files')
     return files
+
+
+def torch2vtk(filename):
+    data = torch.load(filename)
+    data = data.permute(0, 3, 2, 1)  # to npy order zyx -> xyz
+    fx, fy, fz = data.unbind()
+    basename = os.path.splitext(os.path.basename(filename))[0]
+    target_name = os.path.join(os.path.dirname(filename), basename)
+    save_vector_data(fx.numpy(), fy.numpy(), fz.numpy(), 'B', target_name)
 

@@ -1,3 +1,4 @@
+import os
 import sys
 import torch
 import random
@@ -6,7 +7,7 @@ import tqdm
 
 from torch.utils.data import DataLoader
 from model.pinn import PINN_MLP
-from data.dataset import BOXDataset
+from data.dataset import BOXDataset, denormalize_field
 from utils.utils import EMA
 from utils.utils import save_gxbox_as_torch
 from tensorboardX import SummaryWriter
@@ -66,10 +67,29 @@ def evaluate(model, loader, writer, epoch, device):
     return ema.ema
 
 
+@torch.no_grad()
+def predict(model, loader, target_shape, device):
+    model.eval()
+
+    result = torch.empty(target_shape, dtype=torch.float, device=device)
+
+    for i, data in enumerate(tqdm.tqdm(loader)):
+        coord, field, boundary_coord, boundary = data
+        assert len(coord) == 1
+        pred = model(coord.to(device))
+        f = denormalize_field(pred)[0]
+        x, y, z = coord[0].long()
+        result[:, z, y, x] = f
+
+    return result
+
+
 def main(
-        experiment_name='potential_experiment',
+        experiment_name='potential_enlarge',
         data_file='output/b_field.pt',
         log_every=1,
+        do_predict=False,
+        checkpoint_path='output/potential_test/checkpoint_best.pth',
 ):
     torch.manual_seed(2023)
     random.seed(2023)
@@ -77,7 +97,8 @@ def main(
 
     model = PINN_MLP(last_relu=False)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() and not do_predict else "cpu")
+    #device = torch.device("cpu")
     model = model.to(device)
 
     data_cube = torch.load(data_file).float()
@@ -87,13 +108,23 @@ def main(
         d_std, d_mean = torch.std_mean(d, dim=(-3, -2, -1), keepdim=True)
         return (d - d_mean) / d_std
 
+    # DATA MEAN: [16.0314, 4.4297, 5.327] ## DATA STD: [92.8251, 93.0907, 141.2029]
     data_cube = normalize_data_cube(data_cube)
 
-    train_ds = BOXDataset(data_cube)
     val_ds = BOXDataset(data_cube)
 
-    train_loader = DataLoader(train_ds, shuffle=True, batch_size=1024)
-    val_loader = DataLoader(val_ds, shuffle=False, batch_size=1024)
+    if do_predict:
+        model.load_state_dict(torch.load(checkpoint_path))
+        val_loader = DataLoader(val_ds, shuffle=False, batch_size=1)
+        result = predict(model, val_loader, data_cube.shape, device)
+        result = result.detach().cpu()
+        os.makedirs(f'output/{experiment_name}', exist_ok=True)
+        torch.save(result, f'output/{experiment_name}/prediction.pt')
+        exit(0)
+
+    train_ds = BOXDataset(data_cube)
+    train_loader = DataLoader(train_ds, shuffle=True, batch_size=512)
+    val_loader = DataLoader(val_ds, shuffle=False, batch_size=512)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
@@ -125,5 +156,7 @@ def main(
 
 
 if __name__ == '__main__':
+    #from magnetic.utils import torch2vtk
+    #torch2vtk(sys.argv[1])
     main()
     #save_gxbox_as_torch(sys.argv[1])

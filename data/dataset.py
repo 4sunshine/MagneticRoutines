@@ -35,6 +35,15 @@ def create_meshgrid(min_x, max_x, min_y, max_y, min_z, max_z):
     return all_coords
 
 
+def denormalize_field(f):
+    mean, std = (16.0314, 4.4297, 5.327), (92.8251, 93.0907, 141.2029)
+    mean, std = torch.tensor(mean, dtype=torch.float), torch.tensor(std, dtype=torch.float)
+    mean = mean.unsqueeze(0).to(f.device)
+    std = std.unsqueeze(0).to(f.device)
+    f.mul_(std).add_(mean)
+    return f
+
+
 class BOXDataset(Dataset):
     """
     Data shape is: [C, D, H, W]

@@ -1,4 +1,7 @@
 PRO LOOPTRACING
+
+;https://www.lmsal.com/~aschwand/software/ << LOOPS TRACING AND OTHER TUTORIALS
+
 files_extension = '.sav'
 files = DIALOG_PICKFILE(TITLE = 'SELECT FILES TO TRACE', FILTER = '*' + files_extension, /MULTIPLE_FILES)
 sz = size(files)

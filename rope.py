@@ -472,14 +472,6 @@ class RopeFinder(nn.Module):
         return f_pol, grad_f_pol, j_pol, grad_j_pol, f_p, j_p, grad_grad_f_pol, grad_grad_j_pol, f_p_global, coord_data
 
 
-def save(filename):
-    box = GXBox(filename)
-    b = box.field_to_torch(*box.field)
-    j = box.field_to_torch(*box.curl)
-    torch.save(b, 'b_field.pt')
-    torch.save(j, 'curl.pt')
-
-
 def save_points(data, plane_n, grid_size):
     import numpy as np
     from pyevtk.hl import pointsToVTK

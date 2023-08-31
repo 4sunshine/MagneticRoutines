@@ -2,6 +2,17 @@ PRO sav2vtk
   files = DIALOG_PICKFILE(TITLE = 'MAGNETIC BOXES SELECT', /MULTIPLE_FILES)
   sz = size(files)
 
+  PIXEL_SIZE = 400.d ;; (km) Be careful with setting this parameter !!!!!!
+  
+  ;  (PIXEL_SIZE == dx_km) from main.pro.
+  ;   python code:
+  ;   def curl_to_j(curl_val):
+  ;   # J = [Field(G)] * c (== 300 000 km/s) / 4Pi / (pixel_size == 400km)
+  ;   j_cgse_coeff = (300_000 / 4 / np.pi / 400)
+  ;   return curl_val * j_cgse_coeff
+
+  CURL_MULTIPLIER = 300000.d / 4.d / !PI / PIXEL_SIZE
+  
   FOR m=0, sz[1]-1 DO BEGIN
 
     restore, files[m]
@@ -39,6 +50,10 @@ PRO sav2vtk
     ; Calculating curl (rot) of a vector field
     
     curl, box.bx, box.by, box.bz, cx, cy, cz
+
+    jx = CURL_MULTIPLIER * cx
+    jy = CURL_MULTIPLIER * cy
+    jz = CURL_MULTIPLIER * cz
     
     ; Writing curl of a vector field
 
@@ -56,7 +71,7 @@ PRO sav2vtk
     for k=0, nz-1 do begin
       for j=0, ny-1 do begin
         for i=0, nx-1 do begin
-          printf,lun,cx(i,j,k),cy(i,j,k),cz(i,j,k)
+          printf,lun,jx(i,j,k),jy(i,j,k),jz(i,j,k)
         endfor
       endfor
     endfor

@@ -3,6 +3,7 @@ from astropy.time import Time
 from sunpy.map import Map
 from typing import Union
 from astropy.coordinates import SkyCoord
+from sunpy.coordinates.frames import HeliographicCarrington
 from sunpy.physics.differential_rotation import solar_rotate_coordinate
 import astropy.units as u
 import os
@@ -11,12 +12,29 @@ import os
 def xy_arcsec_sdo(x: Union[int, float], y: Union[int, float], obs_time: Time):
     Tx = x * u.arcsec
     Ty = y * u.arcsec
-    return SkyCoord(Tx, Ty, obstime=obs_time, observer="earth", frame="helioprojective")
+    return SkyCoord(Tx, Ty, obstime=obs_time, observer="SDO", frame="helioprojective")
+
+
+def carrington_lon_lat_2sky(x_lon: Union[int, float], y_lat: Union[int, float], obs_time: Time):
+    lon = float(x_lon) * u.deg
+    lat = float(y_lat) * u.deg
+    return SkyCoord(lon=lon, lat=lat, frame=HeliographicCarrington, obstime=obs_time, observer='earth')
+
+def carrington_sky_2lonlat(sky_coord_carr: SkyCoord):
+    lon = float(sky_coord_carr.lon / u.deg)
+    lat = float(sky_coord_carr.lat / u.deg)
+    return round(lon, 3), round(lat, 3)
 
 
 event_time = Time("2017-09-06T09:10:00")
-event_coord = xy_arcsec_sdo(501, -233, event_time)
 
+# SDO Coodrinates maybe incorrect
+# event_x, event_y = 501, -233
+# event_coord = xy_arcsec_sdo(501, -233, event_time)
+
+# From magnetic/get_coord_at_time.py
+lon, lat = 115.929197, -8.
+event_coord = carrington_lon_lat_2sky(lon, lat, event_time)
 
 start_time = Time("2017-09-03T09:00:00")
 end_time = Time("2017-09-06T12:00:00")
@@ -47,16 +65,26 @@ for table in x:
         if t_obs != "MISSING":
             cur_time = Time(t_obs)
             cur_coord = solar_rotate_coordinate(event_coord, time=cur_time)
+            lon, lat = carrington_sky_2lonlat(cur_coord)
+
+            # This stands for Helioprojective
+            # cur_line = ";".join(
+            #     [
+            #         t_obs.replace("T", " "),
+            #         str(cur_coord.Tx).replace('arcsec', ''),
+            #         str(cur_coord.Ty).replace('arcsec', ''),
+            #     ])
+
             cur_line = ";".join(
                 [
                     t_obs.replace("T", " "),
-                    str(cur_coord.Tx).replace('arcsec', ''),
-                    str(cur_coord.Ty).replace('arcsec', ''),
+                    str(lon),
+                    str(lat),
                 ])
 
             lines.append(cur_line)
-            
+
 lines = "\n".join(lines)
 
-with open(f"./coordinates_list_{event_time}.txt", "w") as fw:
+with open(f"./hgc_coords_t_lon_lat_4EVENT_{event_time}.csv", "w") as fw:
     fw.write(lines)

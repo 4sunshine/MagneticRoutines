@@ -75,7 +75,7 @@ for table in x:
             #         str(cur_coord.Ty).replace('arcsec', ''),
             #     ])
 
-            cur_line = ";".join(
+            cur_line = ",".join(
                 [
                     t_obs.replace("T", " "),
                     str(lon),

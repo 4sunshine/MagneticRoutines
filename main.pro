@@ -20,9 +20,10 @@ tmp_dir = 'C:\AppsData\gx_temp'
 dx_km=367.084
 size_pix=[560,400,560]
 
+download_serial_hmi_by_list, size_pix = size_pix, dx_km = dx_km, out_dir = out_dir, tmp_dir = tmp_dir
 
-download_serial_hmi, tstart = tstart, tend = tend, tstep = tstep, centre = centre, $
-                      out_dir = out_dir, tmp_dir = tmp_dir, dx_km = dx_km, size_pix = size_pix
+;download_serial_hmi, tstart = tstart, tend = tend, tstep = tstep, centre = centre, $
+;                      out_dir = out_dir, tmp_dir = tmp_dir, dx_km = dx_km, size_pix = size_pix
 
 
 ;DATAFILE ='C:\AppsData\NLFFFE\BASEMAPS\sav\17 GHz (R+L), KNORH_NLFFFE_170903_224642.sav' ;input image file

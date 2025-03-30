@@ -86,5 +86,5 @@ for table in x:
 
 lines = "\n".join(lines)
 
-with open(f"./hgc_coords_t_lon_lat_4EVENT_{event_time}.csv", "w") as fw:
+with open(f"./hgc_coords_t_lon_lat_4EVENT_{event_time.replace(":", ".")}.csv", "w") as fw:
     fw.write(lines)

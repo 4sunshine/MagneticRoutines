@@ -3,7 +3,7 @@ from astropy.time import Time
 from sunpy.map import Map
 from typing import Union
 from astropy.coordinates import SkyCoord
-from sunpy.coordinates.frames import HeliographicCarrington
+from sunpy.coordinates.frames import HeliographicCarrington, Helioprojective
 from sunpy.physics.differential_rotation import solar_rotate_coordinate
 import astropy.units as u
 import os
@@ -25,6 +25,14 @@ def carrington_sky_2lonlat(sky_coord_carr: SkyCoord):
     lat = float(sky_coord_carr.lat / u.deg)
     return round(lon, 3), round(lat, 3)
 
+def carrington_sky_2helioprojective(sky_coord_carr: SkyCoord):
+    hpc_coord = sky_coord_carr.transform_to(Helioprojective(observer="earth"))
+    return hpc_coord
+
+def helioprojective_sky_2xy(sky_coord_hp: SkyCoord):
+    x = float(sky_coord_hp.Tx / u.arcsec)
+    y = float(sky_coord_hp.Ty / u.arcsec)
+    return round(x, 3), round(y, 3)
 
 event_time = Time("2017-09-06T09:10:00")
 
@@ -57,7 +65,7 @@ print(result)
 
 x = result.show("T_OBS", "SOURCE", "WCSNAME")
 
-lines = []
+lines = ["T_OBS,CRLON,CRLAT,X,Y"]
 
 for table in x:
     for t_obs, in table.iterrows("T_OBS"):
@@ -66,6 +74,9 @@ for table in x:
             cur_time = Time(t_obs)
             cur_coord = solar_rotate_coordinate(event_coord, time=cur_time)
             lon, lat = carrington_sky_2lonlat(cur_coord)
+
+            cur_coord_helioproj = carrington_sky_2helioprojective(cur_coord)
+            x, y = helioprojective_sky_2xy(cur_coord_helioproj)
 
             # This stands for Helioprojective
             # cur_line = ";".join(
@@ -80,11 +91,13 @@ for table in x:
                     t_obs.replace("T", " "),
                     str(lon),
                     str(lat),
+                    str(x),
+                    str(y),
                 ])
 
             lines.append(cur_line)
 
 lines = "\n".join(lines)
 
-with open(f"./hgc_coords_t_lon_lat_4EVENT_{event_time.replace(":", ".")}.csv", "w") as fw:
+with open(f"./hgc_coords_t_lon_lat_4EVENT_{event_time}.csv".replace(":", "."), "w") as fw:
     fw.write(lines)

@@ -21,3 +21,24 @@ FUNCTION make_boxes, times = times, centres = centres, size_pix = size_pix, dx_k
   ENDFOREACH
 RETURN, 1
 END
+
+FUNCTION get_sorted_sav_files, out_dir
+  ; Get all files in the directory
+  files = file_search(out_dir + '\*.sav', count=n_files)
+
+  ; If no files found, return empty array
+  if n_files eq 0 then return, []
+
+  ; Create array to hold just the filenames (without path)
+  filenames = strarr(n_files)
+  FOR i = 0, n_files-1 DO BEGIN
+    file_parts = strsplit(files[i], '/', /extract)
+    filenames[i] = file_parts[-1]  ; Get last element which is the filename
+  ENDFOR
+
+  ; Sort the filenames
+  sorted_indices = sort(filenames)
+  sorted_files = files[sorted_indices]
+
+  return, sorted_files
+END

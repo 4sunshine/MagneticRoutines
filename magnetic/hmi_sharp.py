@@ -14,7 +14,7 @@ EVENT_TIME = '2017.09.06_09:00:00_TAI'
 
 # Search for Data
 START_TIME = '2017-09-03 09:00:00'
-END_TIME = '2017-09-03 12:00:00'  # TODO: Change Later
+END_TIME = '2017-09-06 12:00:00'  # TODO: Change Later
 target_dir = 'D:\\datasets\\fido\\test'
 
 HARPNUM = None

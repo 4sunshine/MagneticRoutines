@@ -83,6 +83,12 @@ def load_files(sharp_data_dir):
     saved_files = []
 
     for i, (t_rec, components) in enumerate(time_files.items()):
+        save_basename = f"{data_type}.{HARPNUM}.{t_rec}"
+        np_out_path = os.path.join(np_dir, f"{save_basename}.npz")
+        plot_path = os.path.join(plot_dir, f"{save_basename}.png")
+
+        if os.path.exists(np_out_path) and os.path.exists(plot_path):
+            continue
 
         data, meta, meta_orig = extract_components(components)
 
@@ -125,8 +131,7 @@ def load_files(sharp_data_dir):
 
         print(f"Vmin:{v_min}\nVmax:{v_max}")
 
-        save_basename = f"{data_type}.{HARPNUM}.{t_rec}"
-        np_out_path = os.path.join(np_dir, f"{save_basename}.npz")
+
         np.savez(np_out_path, **result)
         saved_files.append(np_out_path)
 
@@ -167,7 +172,6 @@ def load_files(sharp_data_dir):
             plt.colorbar(im, ax=axes[i, 1], label='km/s')
 
         plt.tight_layout()
-        plot_path = os.path.join(plot_dir, f"{save_basename}.png")
         plt.savefig(plot_path, dpi=150, bbox_inches='tight')
         plt.close()
 

@@ -1,6 +1,9 @@
-;projection
+; projection
 
-IN_DIR='/home/sunshine/data/20170906_090000_TAI'
+; IN_DIR='/home/sunshine/data/20170906_090000_TAI'
+
+pro proj, IN_DIR
+
 OUT_DIR=IN_DIR
 restore,IN_DIR + '/bxyz_submap.sav',/ver
 mapbz=smapbz

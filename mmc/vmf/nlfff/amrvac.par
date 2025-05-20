@@ -53,9 +53,9 @@
         w_refine_weight(5)=0.2d0
         w_refine_weight(6)=0.2d0
         w_refine_weight(7)=0.2d0
-        block_nx1=10
-        block_nx2=16
-        block_nx3=16
+        block_nx1=24
+        block_nx2=24
+        block_nx3=24
         domain_nx1=240
         domain_nx2=128
         domain_nx3=128

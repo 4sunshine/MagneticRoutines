@@ -1,5 +1,7 @@
 
-IN_DIR='/home/sunshine/data/20170906_090000_TAI'
+; IN_DIR='/home/sunshine/data/20170906_090000_TAI'
+pro plot_submap_m, IN_DIR
+
 restore,IN_DIR+'/mapbxyz_m.sav',/ver
 xrange = [-244., 44]
 yrange = [-395., -155.5]

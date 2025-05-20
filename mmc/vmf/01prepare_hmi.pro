@@ -1,23 +1,28 @@
 ; pro prepare_hmi 
 ; 
 
-DATA_DIR = '/home/sunshine/Downloads'
-EVENT_TIME = '20170906_090000_TAI' ; Actual time
-REFERENCE_TIME = '20170903_090000_TAI'  ; The time to DROT for
-SAVE_ALL_DIR = '/home/sunshine/data'
-IF ~FILE_TEST(SAVE_ALL_DIR, /DIRECTORY) THEN FILE_MKDIR, OUT_DIR
+; DATA_DIR = '/home/sunshine/Downloads'
+; EVENT_TIME = '20170906_090000_TAI' ; Actual time
+; REFERENCE_TIME = '20170903_090000_TAI'  ; The time to DROT for
+; SAVE_ALL_DIR = '/home/sunshine/data'
+
+pro prepare_hmi, DATA_DIR, EVENT_TIME, REFERENCE_TIME, SAVE_ALL_DIR
+
+IF ~FILE_TEST(SAVE_ALL_DIR, /DIRECTORY) THEN FILE_MKDIR, SAVE_ALL_DIR
 OUT_DIR = SAVE_ALL_DIR + '/' + EVENT_TIME
 IF ~FILE_TEST(OUT_DIR, /DIRECTORY) THEN FILE_MKDIR, OUT_DIR
 
-fn1 = DATA_DIR+'/hmi.B_720s.' + EVENT_TIME + '.field.fits'
+; could be also hmi.B_720s.
+fn1 = DATA_DIR+'/hmi.b_720s.' + EVENT_TIME + '.field.fits'
+print, FILE_TEST(fn1), fn1
 read_sdo,fn1,index1,data1
 index2map,index1,data1,mapb
-fn2 =DATA_DIR+'/hmi.B_720s.'+ EVENT_TIME +'.inclination.fits'
+fn2 =DATA_DIR+'/hmi.b_720s.'+ EVENT_TIME +'.inclination.fits'
 read_sdo,fn2,index2,data2
 index2map,index2,data2,mapi
-fn3=DATA_DIR+'/hmi.B_720s.'+EVENT_TIME+'.azimuth.fits'
+fn3=DATA_DIR+'/hmi.b_720s.'+EVENT_TIME+'.azimuth.fits'
 read_sdo,fn3,index3,data3
-fn4=DATA_DIR+'/hmi.B_720s.'+EVENT_TIME+'.disambig.fits'
+fn4=DATA_DIR+'/hmi.b_720s.'+EVENT_TIME+'.disambig.fits'
 read_sdo,fn4,index4,data4
 ns=size(data4)
 for j=0,ns[2]-1 do begin

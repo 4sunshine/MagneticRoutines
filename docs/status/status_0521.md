@@ -170,27 +170,12 @@ make clean
 ```
 If nblocks numbers are not good, update them as well.  
 
-## :thinking_face:Further steps:sun_with_face::sun_with_face::sun_with_face:  
+## :sun_with_face::question::sun_with_face:Further steps:sun_with_face::question::sun_with_face:  
 
-:white_check_mark: Generally, I've completed preparation of data. I can reconstruct the B-field for every moment in time with MPI-AMRVAC (potential field requires seconds, nlfff requires ~40 minutes). I also can obtain a velocity of plasma on the bottom boundary with an adaptation of DAVE4VM. :warning: Some issues for a long time range analysis remain (see above). I believe that they are related a careful RoI choice & Sun center corrections.  
+:white_check_mark: Generally, I've completed preparation and downloading of data. I can reconstruct the B-field for every moment in time with MPI-AMRVAC (potential field requires seconds, nlfff requires ~40 minutes). I also can obtain a velocity of plasma on the bottom boundary with an adaptation of DAVE4VM. :warning: Some issues for a long time range analysis remain (see above). I believe that they are related a careful RoI choice & Sun center corrections.  
 
 :question: ***Which next steps should I do to reproduce your paper [Data-driven Modeling of a Coronal Magnetic Flux Rope: From Birth to Death](https://doi.org/10.3847/1538-4357/ad088d)?***
 
-## IDL scripts for GX-simulator 
-### Creation of GX simulator-compatible boxes  
-Create *New project* in IDL. Set local directory of this repo as a project's folder. 
-Compile created project. Edit required parameters of `main.pro` and run it. Boxes with potential field 
-extrapolation will be created.  
-To make linear force-free extrapolation run:  
-`idl_magnetic/multi_nlfffe.pro`  
-To save data cube as `.vtk` file run:  
-`idl_magnetic/sav2vtk.pro`  
-### Add NoRH fits file to box  
-Run  
-`idl_magnetic/add_single_norh.pro`  
-1. Select file with required magnetic field extrapolation.
-2. Choose .fits file you want to add.
-
-Basemaps can be imported and created using `idl_magnetic/makebasemap.pro`.  
-
-*Note that python conversion scripts run more effectively in terms of speed and result files sizes.
+:envelope: [shainalexander@yandex.ru](shainalexander@yandex.ru)  
+  
+Best Regards, Aleksandr (Alex) Shain  

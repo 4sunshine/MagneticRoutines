@@ -1,0 +1,2 @@
+dx dy [for boundary conditions, cm]:
+1.4596179e+08 1.4596179e+08

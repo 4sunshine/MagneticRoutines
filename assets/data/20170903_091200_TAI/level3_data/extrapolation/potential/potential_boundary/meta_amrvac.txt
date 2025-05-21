@@ -1,0 +1,7 @@
+x,y, and z range (10 Mm):
+        xprobmin1=-17.824522d0
+        xprobmax1=3.1939752d0
+        xprobmin2=-28.853268d0
+        xprobmax2=-11.337854d0
+        xprobmin3=0.100000d0
+        xprobmax3=17.515415d0

@@ -20,6 +20,7 @@ def calculate_dx_dy(meta):
     dx = rsun_km * cdelt1_deg * np.pi / 180.
     meta['DX'] = dx
     meta['DX_UNIT'] = 'km'
+    meta['ARCSEC2CM'] = meta["RSUN_REF"] * 1e2 / meta["RSUN_OBS"]
 
 
 def extract_components(components):
@@ -31,11 +32,26 @@ def extract_components(components):
     bz = np.array(br.data)
     meta_ = bt.meta
 
+    try:
+        wcs = bt.wcs
+        assert meta_["CUNIT1"] == meta_["CUNIT2"] == "degree"
+        center = wcs.pixel_to_world(float(meta_["CRPIX1"]) * u.pix, float(meta_["CRPIX2"]) * u.pix)
+        center = center.transform_to("helioprojective")
+        center = (float(center.Tx / u.arcsec), float(center.Ty / u.arcsec))
+    except Exception as e:
+        print("!!! WCS exception\n", e)
+        raise ValueError
+
     data = np.stack([bx, by, bz], axis=0)
 
     keys = ["HARPNUM", "DATE-OBS", "BUNIT", "NOAA_ARS", "CDELT1", "CDELT2", "RSUN_OBS", "RSUN_REF"]
 
     meta = {k: meta_.get(k, None) for k in keys}
+
+    # needed for potential field
+
+    meta["ARCSEC_XC"] = center[0]
+    meta["ARCSEC_YC"] = center[1]
 
     calculate_dx_dy(meta)
 
@@ -83,6 +99,11 @@ def load_files(sharp_data_dir):
     saved_files = []
 
     for i, (t_rec, components) in enumerate(time_files.items()):
+
+        # boundary condition in time
+        if i == (num_times - 1):
+            break
+
         save_basename = f"{data_type}.{HARPNUM}.{t_rec}"
         np_out_path = os.path.join(np_dir, f"{save_basename}.npz")
         plot_path = os.path.join(plot_dir, f"{save_basename}.png")
@@ -175,8 +196,6 @@ def load_files(sharp_data_dir):
         plt.savefig(plot_path, dpi=150, bbox_inches='tight')
         plt.close()
 
-        if i == (num_times - 2):
-            break
 
     with open(os.path.join(sharp_data_dir, "BV_npz_files.txt"), "w") as fw:
         fw.write("\n".join(saved_files))

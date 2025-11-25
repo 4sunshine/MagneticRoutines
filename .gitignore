@@ -1,2 +1,5 @@
 *.sav
 __pycache__
+*.dat
+*.log
+*.vtu

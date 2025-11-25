@@ -12,7 +12,7 @@
         itsave(1,1)=0
         itsave(1,2)=0
         dtsave_log=1.d0
-        dtsave_dat=7.5d1
+        dtsave_dat=2.5d1
 /
 
  &stoplist

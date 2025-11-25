@@ -11,12 +11,12 @@
  &savelist
         itsave(1,1)=0
         itsave(1,2)=0
-        dtsave_log=2.d-1
-        dtsave_dat=4.d-1
+        dtsave_log=1.d0
+        dtsave_dat=7.5d1
 /
 
  &stoplist
-        time_max=80.d0
+        time_max=1.5d4
  /
 
  &methodlist
@@ -87,3 +87,14 @@
         B0field=.true.
         B0field_forcefree=.true.
         mhd_adiab=0.d0
+
+ /
+
+ &usr_list
+        R_footpoint=1.5d8
+        Period_footpoint_hours=36.d0
+        V_decay_footpoint=1.d0
+        L_para=1.5d9
+        d_para=1.d9
+        Footpoint_dX=0.d0
+ /

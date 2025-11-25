@@ -9,7 +9,9 @@ module mod_usr
   double precision :: pa(jmax),ra(jmax),ya(jmax)
   double precision :: usr_grav,SRadius,rhob,Tiso,dr,gzone,bQ0
   double precision :: q_para,d_para,L_para, charge1_x(3), charge2_x(3), charge1, charge2
+  ! Added for rotation
   double precision :: V_decay_footpoint, Omega_footpoint, R_footpoint, Period_footpoint_hours
+  double precision :: Footpoint_dX, Footpoint1_x(2), Footpoint2_x(2)
 
 contains
 
@@ -32,14 +34,44 @@ contains
     usr_init_vector_potential=>initvecpot_usr
     usr_aux_output      => specialvar_output
     usr_add_aux_names   => specialvarnames_output
-    usr_set_electric_field => driven_electric_field
+    !usr_set_electric_field => driven_electric_field
     usr_set_B0          => specialset_B0
     usr_set_J0          => specialset_J0
 
     call set_coordinate_system("Cartesian_3D")
     call mhd_activate()
+    call params_read(par_files)
 
   end subroutine usr_init
+
+  !> Read parameters from a file
+  subroutine params_read(files)
+    use mod_global_parameters, only: unitpar
+    character(len=*), intent(in) :: files(:)
+    integer                      :: n
+
+    namelist /usr_list/ &
+      R_footpoint, &
+      Period_footpoint_hours, &
+      V_decay_footpoint, &
+      L_para, d_para, &
+      Footpoint_dX
+      ! where you tell the code to read your own parameters
+
+    do n = 1, size(files)
+      open(unitpar, file=trim(files(n)), status="old")
+      read(unitpar, usr_list, end=111)
+111   close(unitpar)
+    end do
+
+    Omega_footpoint=2.d0*dpi/(3600.d0*Period_footpoint_hours/unit_time)
+    R_footpoint=R_footpoint/unit_length
+    L_para=L_para/unit_length
+    d_para=d_para/unit_length
+
+    Footpoint_dX=Footpoint_dX/unit_length
+
+  end subroutine params_read
 
   !==============================================================================
   ! Purpose: to initialize user public parameters and reset global parameters.
@@ -71,8 +103,8 @@ contains
 
     !q_para=7.d19/(unit_magneticfield*unit_length**2) ! strength and sign of magnetic charges
     q_para=Busr*2.10025d18/(unit_magneticfield*unit_length**2) ! strength and sign of magnetic charges
-    d_para=1.d9/unit_length ! depth of magnetic charges
-    L_para=1.5d9/unit_length ! half distance between magnetic charges
+    !d_para=1.d9/unit_length ! depth of magnetic charges
+    !L_para=1.5d9/unit_length ! half distance between magnetic charges READ FROM FILE
 
     charge1=-q_para
     charge1_x(1)=-L_para
@@ -84,11 +116,27 @@ contains
     charge2_x(2)=0.d0
     charge2_x(3)=-d_para
 
+    Footpoint1_x(1)=charge1_x(1)-Footpoint_dX
+    Footpoint1_x(2)=charge1_x(2)
+
+    Footpoint2_x(1)=charge2_x(1)+Footpoint_dX
+    Footpoint2_x(2)=charge2_x(2)
+
     ! Footpoint Rotating
-    R_footpoint=L_para/3.d0
-    Period_footpoint_hours=1.d-1
-    Omega_footpoint=2.d0*dpi/(3600.d0*Period_footpoint_hours/unit_time)  !define Rotating period hours
-    V_decay_footpoint=2.d0
+    ! R_footpoint=L_para/1.d1  ! 0.1 R_curvature
+    if(mype == 0) then
+      print*,"R_footpoint=",R_footpoint
+      print*,"Period (hours)=",Period_footpoint_hours
+      print*,"Omega=",Omega_footpoint
+      print*,"V_decay=",V_decay_footpoint
+      print*,"Footpoint1_x",Footpoint1_x
+      print*,"Footpoint2_x",Footpoint2_x
+    end if
+
+    ! R_footpoint=R_footpoint/unit_length
+    ! Period_footpoint_hours=3.6d1  ! one-half-day period
+    ! Omega_footpoint=2.d0*dpi/(3600.d0*Period_footpoint_hours/unit_time)  !define Rotating period hours
+    ! V_decay_footpoint=1.d0
 
     if(mhd_energy) call inithdstatic
 
@@ -272,23 +320,23 @@ contains
   end subroutine bipolar_field
 
   ! allow user to change inductive electric field, especially for boundary driven applications
-  subroutine driven_electric_field(ixI^L,ixO^L,qt,qdt,fE,s)
-    use mod_global_parameters
-    integer, intent(in)                :: ixI^L, ixO^L
-    double precision, intent(in)       :: qt,qdt
-    type(state)                        :: s
-    double precision, intent(inout)    :: fE(ixI^S,7-2*ndim:3)
+  ! subroutine driven_electric_field(ixI^L,ixO^L,qt,qdt,fE,s)
+  !   use mod_global_parameters
+  !   integer, intent(in)                :: ixI^L, ixO^L
+  !   double precision, intent(in)       :: qt,qdt
+  !   type(state)                        :: s
+  !   double precision, intent(inout)    :: fE(ixI^S,7-2*ndim:3)
 
-    integer :: ixC^L
+  !   integer :: ixC^L
 
-    ! fix Bz at bottom boundary
-    if(s%is_physical_boundary(5)) then
-      ixCmin^D=ixOmin^D-1;
-      ixCmax^D=ixOmax^D;
-      fE(nghostcells^%3ixC^S,1:2)=0.d0
-    end if
+  !   ! fix Bz at bottom boundary
+  !   if(s%is_physical_boundary(5)) then
+  !     ixCmin^D=ixOmin^D-1;
+  !     ixCmax^D=ixOmax^D;
+  !     fE(nghostcells^%3ixC^S,1:2)=0.d0
+  !   end if
 
-  end subroutine driven_electric_field
+  ! end subroutine driven_electric_field
 
   subroutine spot_velocity_point(vx, vy, xxx, yyy, x_cc, y_cc, R_disc, Omega_disc, Vdecay_disc)
     implicit none
@@ -583,13 +631,13 @@ contains
             !-------------------------------------
             ! Velocity from spot 1
             !-------------------------------------
-            call spot_velocity_point(vx1,vy1, xcord,ycord, charge1_x(1),charge1_x(2), &
+            call spot_velocity_point(vx1,vy1, xcord,ycord, Footpoint1_x(1),Footpoint1_x(2), &
                                       R_footpoint,Omega_footpoint,V_decay_footpoint)
 
             !-------------------------------------
             ! Velocity from spot 2
             !-------------------------------------
-            call spot_velocity_point(vx2,vy2, xcord,ycord, charge2_x(1),charge2_x(2), &
+            call spot_velocity_point(vx2,vy2, xcord,ycord, Footpoint2_x(1),Footpoint2_x(2), &
                                       R_footpoint,Omega_footpoint,V_decay_footpoint)
 
             !-------------------------------------

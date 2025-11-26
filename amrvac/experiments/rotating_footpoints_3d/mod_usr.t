@@ -10,8 +10,9 @@ module mod_usr
   double precision :: usr_grav,SRadius,rhob,Tiso,dr,gzone,bQ0
   double precision :: q_para,d_para,L_para, charge1_x(3), charge2_x(3), charge1, charge2
   ! Added for rotation
-  double precision :: V_decay_footpoint, Omega_footpoint, R_footpoint, Period_footpoint_hours
-  double precision :: Footpoint_dX, Footpoint1_x(2), Footpoint2_x(2)
+  double precision :: Omega_footpoint, R_footpoint, Period_footpoint_hours
+  double precision :: Footpoint_dX, Footpoint1_x(2), Footpoint2_x(2), R_foot_decay
+  double precision :: DT_cold_start, DT_fade_in, DT_rotation, DT_fade_out
 
 contains
 
@@ -52,10 +53,11 @@ contains
 
     namelist /usr_list/ &
       R_footpoint, &
+      R_foot_decay, &  ! Distance from disk center to vanish rotation field to 0
       Period_footpoint_hours, &
-      V_decay_footpoint, &
       L_para, d_para, &
-      Footpoint_dX
+      Footpoint_dX, &
+      DT_cold_start, DT_fade_in, DT_rotation, DT_fade_out
       ! where you tell the code to read your own parameters
 
     do n = 1, size(files)
@@ -66,8 +68,15 @@ contains
 
     Omega_footpoint=2.d0*dpi/(3600.d0*Period_footpoint_hours/unit_time)
     R_footpoint=R_footpoint/unit_length
+    R_foot_decay=R_foot_decay/unit_length
     L_para=L_para/unit_length
     d_para=d_para/unit_length
+
+    !!!!! DT should be defined in **hours** !!!!!
+    DT_cold_start=DT_cold_start*3.6d3/unit_time
+    DT_fade_in=DT_fade_in*3.6d3/unit_time
+    DT_rotation=DT_rotation*3.6d3/unit_time
+    DT_fade_out=DT_fade_out*3.6d3/unit_time
 
     Footpoint_dX=Footpoint_dX/unit_length
 
@@ -126,9 +135,9 @@ contains
     ! R_footpoint=L_para/1.d1  ! 0.1 R_curvature
     if(mype == 0) then
       print*,"R_footpoint=",R_footpoint
+      print*,"R_foot_decay=",R_foot_decay
       print*,"Period (hours)=",Period_footpoint_hours
       print*,"Omega=",Omega_footpoint
-      print*,"V_decay=",V_decay_footpoint
       print*,"Footpoint1_x",Footpoint1_x
       print*,"Footpoint2_x",Footpoint2_x
     end if
@@ -136,7 +145,6 @@ contains
     ! R_footpoint=R_footpoint/unit_length
     ! Period_footpoint_hours=3.6d1  ! one-half-day period
     ! Omega_footpoint=2.d0*dpi/(3600.d0*Period_footpoint_hours/unit_time)  !define Rotating period hours
-    ! V_decay_footpoint=1.d0
 
     if(mhd_energy) call inithdstatic
 
@@ -338,29 +346,103 @@ contains
 
   ! end subroutine driven_electric_field
 
-  subroutine spot_velocity_point(vx, vy, xxx, yyy, x_cc, y_cc, R_disc, Omega_disc, Vdecay_disc)
+  double precision function smoothstep_quintic(uu_)
     implicit none
+    double precision, intent(in) :: uu_
 
-    double precision, intent(in)  :: xxx, yyy
-    double precision, intent(in)  :: x_cc, y_cc, R_disc, Omega_disc, Vdecay_disc
-    double precision, intent(out) :: vx, vy
-
-    double precision :: delta_xxx, delta_yyy, delta_rr, g_coeff
-
-    delta_xxx = xxx - x_cc
-    delta_yyy = yyy - y_cc
-    delta_rr  = sqrt(delta_xxx*delta_xxx + delta_yyy*delta_yyy)
-
-    if (delta_rr <= R_disc) then
-      g_coeff = 1.d0
+    if (uu_ <= 0d0) then
+      smoothstep_quintic = 0d0
+    elseif (uu_ >= 1d0) then
+      smoothstep_quintic = 1d0
     else
-      g_coeff = exp( -Vdecay_disc * (delta_rr - R_disc)**2 )
+      smoothstep_quintic = 6d0*uu_**5 - 15d0*uu_**4 + 10d0*uu_**3
     end if
 
-    vx = -Omega_disc * delta_yyy * g_coeff
-    vy =  Omega_disc * delta_xxx * g_coeff
+  end function smoothstep_quintic
+
+  subroutine spot_velocity_point(vx, vy, g_coeff, xxx, yyy, x_cc, y_cc, &
+                                R_disc, Omega_disc, R_decay)
+    implicit none
+
+    ! Inputs
+    double precision, intent(in)  :: xxx, yyy
+    double precision, intent(in)  :: x_cc, y_cc, R_disc, Omega_disc, R_decay
+
+    ! Outputs
+    double precision, intent(out) :: vx, vy, g_coeff
+
+    ! Locals (avoid conflict with AMRVAC globals dx(), dy())
+    double precision :: dx_c, dy_c, rr
+    double precision :: u_r, s_r, R_vanish
+
+    ! Coordinates relative to spot center
+    dx_c = xxx - x_cc
+    dy_c = yyy - y_cc
+    rr   = sqrt(dx_c*dx_c + dy_c*dy_c)
+
+    ! End of fade region
+    R_vanish = R_disc + R_decay
+
+    ! Compute fade coefficient g_coeff
+    if (rr <= R_disc) then
+      g_coeff = 1d0
+    elseif (rr >= R_vanish) then
+      g_coeff = 0d0
+    else
+      u_r = (rr - R_disc) / R_decay
+      s_r = 6d0*u_r**5 - 15d0*u_r**4 + 10d0*u_r**3
+      g_coeff = 1d0 - s_r
+    end if
+
+    ! Pure rotation velocity (unscaled!)
+    vx = -Omega_disc * dy_c
+    vy =  Omega_disc * dx_c
 
   end subroutine spot_velocity_point
+
+  double precision function time_fade(t_, DT_cold_start_, DT_fade_in_, DT_rotation_, DT_fade_out_)
+    implicit none
+    double precision, intent(in) :: t_
+    double precision, intent(in) :: DT_cold_start_, DT_fade_in_, DT_rotation_, DT_fade_out_
+    double precision :: t0, t1, t2, t3, uu_
+
+    ! Time region boundaries
+    t0 = DT_cold_start_
+    t1 = t0 + DT_fade_in_
+    t2 = t1 + DT_rotation_
+    t3 = t2 + DT_fade_out_
+
+    ! Region 0: cold start
+    if (t_ <= t0) then
+      time_fade = 0d0
+      return
+    end if
+
+    ! Region 1: fade-in
+    if (t_ < t1) then
+      uu_ = (t_ - t0) / DT_fade_in_
+      time_fade = smoothstep_quintic(uu_)
+      return
+    end if
+
+    ! Region 2: fully-on
+    if (t_ < t2) then
+      time_fade = 1d0
+      return
+    end if
+
+    ! Region 3: fade-out
+    if (t_ < t3) then
+      uu_ = (t3 - t_) / DT_fade_out_
+      time_fade = smoothstep_quintic(uu_)
+      return
+    end if
+
+    ! Region 4: after fade-out
+    time_fade = 0d0
+
+  end function time_fade
+
 
 
   subroutine specialbound_usr(qt,ixI^L,ixO^L,iB,w,x)
@@ -373,9 +455,12 @@ contains
     double precision :: xlen^D,dxb^D,startpos^D,coeffrho
     integer :: idir,ix^D,ixIM^L,ixOs^L,jxO^L
     ! for velocity
-    integer :: x_ind, y_ind, z_ind
+    integer :: x_ind, y_ind, z_ind, z_mirror
     double precision :: xcord, ycord
-    double precision :: vx1, vy1, vx2, vy2
+    double precision :: v_rot1_x, v_rot1_y, v_rot2_x, v_rot2_y
+    double precision :: v_ref_x, v_ref_y, rho_mirr  ! reflected velocities
+    double precision :: g_coeff_1, g_coeff_2, ref_weight  ! assume rotating regions don't intersect
+    double precision :: g_t  ! for time
     ! for velocity
 
     if(mhd_glm) w(ixO^S,psi_)=0.d0
@@ -618,6 +703,9 @@ contains
        end if
        call mhd_to_conserved(ixI^L,ixO^L,w,x)
      case(5)
+
+      g_t = time_fade(qt, DT_cold_start, DT_fade_in, DT_rotation, DT_fade_out)
+
       do z_ind = ixOmin3, ixOmax3
         do y_ind = ixOmin2, ixOmax2
           do x_ind = ixOmin1, ixOmax1
@@ -631,21 +719,38 @@ contains
             !-------------------------------------
             ! Velocity from spot 1
             !-------------------------------------
-            call spot_velocity_point(vx1,vy1, xcord,ycord, Footpoint1_x(1),Footpoint1_x(2), &
-                                      R_footpoint,Omega_footpoint,V_decay_footpoint)
+            call spot_velocity_point(v_rot1_x, v_rot1_y, g_coeff_1, xcord,ycord, &
+                                      Footpoint1_x(1),Footpoint1_x(2), &
+                                      R_footpoint,Omega_footpoint,R_foot_decay)
 
             !-------------------------------------
             ! Velocity from spot 2
             !-------------------------------------
-            call spot_velocity_point(vx2,vy2, xcord,ycord, Footpoint2_x(1),Footpoint2_x(2), &
-                                      R_footpoint,Omega_footpoint,V_decay_footpoint)
+            call spot_velocity_point(v_rot2_x, v_rot2_y, g_coeff_2, xcord,ycord, &
+                                      Footpoint2_x(1),Footpoint2_x(2), &
+                                      R_footpoint,Omega_footpoint,R_foot_decay)
 
             !-------------------------------------
             ! Set boundary velocity
             !-------------------------------------
-            w(x_ind,y_ind,z_ind,mom(1)) = vx1 + vx2
-            w(x_ind,y_ind,z_ind,mom(2)) = vy1 + vy2
-            w(x_ind,y_ind,z_ind,mom(3)) = 0.0d0      ! no vertical flow
+            g_coeff_1 = max(0.d0, min(1.d0, g_t * g_coeff_1))
+            g_coeff_2 = max(0.d0, min(1.d0, g_t * g_coeff_2))
+
+            ref_weight = 1.d0 - max(g_coeff_1, g_coeff_2)
+
+            z_mirror = ixOmax3 + nghostcells + 1 - z_ind !! TODO: check carefully
+
+            rho_mirr = w(x_ind, y_ind, z_mirror, rho_)
+            v_ref_x = -w(x_ind, y_ind, z_mirror, mom(1)) / rho_mirr
+            v_ref_y = -w(x_ind, y_ind, z_mirror, mom(2)) / rho_mirr
+
+            w(x_ind,y_ind,z_ind,mom(1)) = &
+                g_coeff_1 * v_rot1_x + g_coeff_2 * v_rot2_x + ref_weight * v_ref_x
+            w(x_ind,y_ind,z_ind,mom(2)) = &
+                g_coeff_1 * v_rot1_y + g_coeff_2 * v_rot2_y + ref_weight * v_ref_y
+
+            ! Vz always reflected
+            w(x_ind,y_ind,z_ind,mom(3)) = - w(x_ind,y_ind,z_mirror,mom(3)) / rho_mirr
 
           end do
         end do

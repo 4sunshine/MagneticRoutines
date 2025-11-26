@@ -93,8 +93,12 @@
  &usr_list
         R_footpoint=1.5d8
         Period_footpoint_hours=36.d0
-        V_decay_footpoint=1.d0
+        R_foot_decay=1.5d8
         L_para=1.5d9
         d_para=1.d9
         Footpoint_dX=0.d0
+        DT_cold_start=0.5d0
+        DT_fade_in=36.d0
+        DT_rotation=72.d0
+        DT_fade_out=36.d0
  /

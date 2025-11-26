@@ -1,8 +1,8 @@
 #!/bin/bash
 
-#SBATCH -J amrvac_compile             # Job name
-#SBATCH -o amrvac_compile.o%j         # Name of stdout output file
-#SBATCH -e amrvac_compile.e%j         # Name of stderr error file
+#SBATCH -J compile_amrvac             # Job name
+#SBATCH -o compile_amrvac.o%j         # Name of stdout output file
+#SBATCH -e compile_amrvac.e%j         # Name of stderr error file
 #SBATCH -p cpu                # Queue (partition) name: normal or development
 #SBATCH -N 1                  # Total # of nodes
 #SBATCH --tasks-per-node 8    # Number of MPI tasks per node.

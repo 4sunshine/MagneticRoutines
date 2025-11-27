@@ -244,6 +244,10 @@ endif
 
 Refinement level up to 5 is plausible for final experiment.  
 
+Refinement levels could be seen in Paraview, when applying Slice of b_z, for example.
+Then choose representation: `Surface with edges`. This will show the mesh.  
+`block_nx` in `.par` means the parallel computation block.  
+
 ### Relevant model  
 Titov & Démoulin (1999)  
 

@@ -13,7 +13,8 @@
   ;
   ; :Author: Sergey Anfinogentov (anfinogentov@iszf.irk.ru)
   ;-
-  
+  ; :Update: Shain Alexander (shainalexander@ya.ru)
+
 
 FUNCTION remove_struct_tags, s, remove
   COMPILE_OPT idl2
@@ -41,7 +42,6 @@ FUNCTION remove_struct_tags, s, remove
 END
 
 
-
 pro gx_box_add_refmap_srh, box, fits_file, id = id
 
   wcs = fitshead2wcs(box.index)
@@ -57,24 +57,17 @@ pro gx_box_add_refmap_srh, box, fits_file, id = id
 
   nx = wcs.naxis[0]
   ny = wcs.naxis[1]
-  
-  
+    
   pix = lonarr(2, 4)
   pix[0,*] = [0, 0, nx - 1, nx -1]
   pix[1,*] = [0, ny -1, ny - 1, 0]
-  
-  
-  
+
   crd = wcs_get_coord(wcs, pix)
   wcs_convert_from_coord,wcs,crd,'HG', lon, lat, /carrington
   wcs_convert_to_coord,wcs_input,crd_ref,'HG', lon, lat, /carrington
-  
-  
+
   wcs_convert_from_coord,wcs,wcs.crval,'HG', lon, lat, /carrington
   wcs_convert_to_coord,wcs_input,crval_ref,'HG', lon, lat, /carrington
-  
-  
-  
   
   pix_ref = wcs_get_pixel(wcs_input, crd_ref)
   xrange = minmax(pix_ref[0,*])
@@ -89,20 +82,12 @@ pro gx_box_add_refmap_srh, box, fits_file, id = id
   WCS_ref = WCS_2D_SIMULATE(nx_ref, ny_ref, CDELT=wcs_input.cdelt, DSUN_OBS=wcs_input.position.dsun_obs,$
      date_obs = wcs_input.time.observ_date, crval = crval_ref)
      
-     print, "WCS_REF"
-     print, WCS_ref
-     
   foo = wcs_remap(data, wcs_input, wcs_ref)
   wcs2map,foo,wcs_ref, map
   map.id = id
   map.b0 = wcs_ref.position.solar_b0
-
   
   ind = (*box.refmaps).get(/count)
   (*box.refmaps).set,ind, map = map
-     
-  
-  
- ; stop
 
 end

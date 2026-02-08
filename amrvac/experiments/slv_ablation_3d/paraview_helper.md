@@ -68,6 +68,17 @@ B_0 = 1.99757357615242\ \mathrm{G}
 
 **Output:** Vector magnetic field in **Gauss**
 
+## Simulation Time Annotation
+
+This note documents the **Annotate Time** filter configuration used to display
+physical simulation time in **hours**.
+
+### Annotate Time → Format
+
+```text
+t = {time:.2f} h
+```
+
 ---
 
 ## Notes

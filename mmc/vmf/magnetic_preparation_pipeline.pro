@@ -28,6 +28,7 @@ while (~EOF(lun_in)) do begin
 
 endwhile
 
+close, lun_in
 free_lun, lun_in
 
 END

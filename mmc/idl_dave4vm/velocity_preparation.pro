@@ -12,8 +12,7 @@ function read_allboundaries, _data_dir
 
   grid_file = data_dir + '/grid.ini'
 
-  get_lun,u
-  openr,u, grid_file
+  openr,u, grid_file,/get_lun
   _ = ''
   readf,u,_
   readf,u,nx
@@ -53,8 +52,7 @@ function read_dxdy, data_dir
   ; Reads dxdy in cm
   dxdy_file = data_dir + '/level3_data/dxdy_cm.txt'
 
-  get_lun,u
-  openr,u, dxdy_file
+  openr,u, dxdy_file,/get_lun
   _ = ''
   dxdy = ''
   readf,u,_
@@ -74,6 +72,7 @@ end
 function replace_nans, array
   ; Replaces NaNs with zeros
   bad = WHERE(~FINITE(array), count)
+  print,bad
   IF count GT 0 THEN array[bad] = 0.
   return, array
 end
@@ -97,8 +96,7 @@ pro write_2d_array_dat, dat_path, ax, ay, az
   nx = nd[0]
   ny = nd[1]
 
-  get_lun, u
-  openw, u, dat_path
+  openw, u, dat_path, /get_lun
   for iy=0,ny-1 do begin
     for ix=0,nx-1 do begin
       printf,u, ax[ix,iy]
@@ -111,6 +109,35 @@ pro write_2d_array_dat, dat_path, ax, ay, az
 
 end
 
+pro write_2d_array_bin, dat_path, ax, ay, az
+  ; Writes array as readable .dat file
+  nd = SIZE(ax, /DIMENSION)
+  nx = nd[0]
+  ny = nd[1]
+  
+  openw, u, dat_path,/get_lun
+  for iy=0,ny-1 do begin
+    for ix=0,nx-1 do begin
+      printf,u, ax[ix,iy]
+      printf,u, ay[ix,iy]
+      printf,u, az[ix,iy]
+    endfor
+  endfor
+  close,u
+  free_lun,u
+end
+
+pro save_current_timestamp, filename, line
+  ; Open the file for writing (creates new or overwrites existing)
+  openw, lun, filename, /get_lun
+  ; Write the line to the file
+  printf, lun, line
+  ; Close the file
+  close, lun
+  ; Free the LUN
+  free_lun, lun
+end
+
 ; pro velocity_preparation
 ; ------ inputs --------------------------------
 DATA_DIR = '/home/sunshine/repos/MagneticRoutines/downloads'
@@ -120,8 +147,7 @@ OUT_DIR = '/home/sunshine/data/event_20170906'
 
 timestamps = DATA_DIR + '/times_paired.txt'
 
-get_lun, lun_in
-openr, lun_in, timestamps
+openr, lun_in, timestamps,/get_lun
 
 while (~EOF(lun_in)) do begin
   cur_pair = ''
@@ -130,7 +156,7 @@ while (~EOF(lun_in)) do begin
   words = STRSPLIT(cur_pair, /EXTRACT)
   time_start = words[0]
   time_end = words[1]
-  
+
   CUR_OUT_DIR = OUT_DIR + '/' + time_start
   start_data_dir = OUT_DIR + '/' + time_start ;+ '/level3_data'
   dxdy = read_dxdy(start_data_dir)
@@ -138,20 +164,23 @@ while (~EOF(lun_in)) do begin
   b_start = read_allboundaries(start_data_dir)
   end_data_dir = OUT_DIR + '/' + time_end ;+ '/level3_data'
   b_stop = read_allboundaries(end_data_dir)
+
+  save_current_timestamp, CUR_OUT_DIR + '/level3_data/timestamp.txt', b_start.TIME
+
   start_seconds = utc2sec(anytim2utc(b_start.TIME))
   end_seconds = utc2sec(anytim2utc(b_stop.TIME))
   dt = double(end_seconds - start_seconds)
 
   DX = double(dxdy.DX / 1.d5) ; km
   DY = double(dxdy.DY / 1.d5) ; km
-  
+
   ;;;;;; !!!!!!!!!!!! SET WINDOWSIZE
-  windowsize = 25
-  
+  windowsize = 19
+
   bx_start = b_start.BXB
   by_start = b_start.BYB
   bz_start = b_start.BZB
-  
+
   bx_stop = b_stop.BXB
   by_stop = b_stop.BYB
   bz_stop = b_stop.BZB
@@ -188,7 +217,7 @@ while (~EOF(lun_in)) do begin
   write_png, CUR_OUT_DIR+'/svz_m.png', tvrd()
 
 endwhile
-
+close, lun_in
 free_lun, lun_in
 
 END
